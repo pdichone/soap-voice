@@ -2,26 +2,210 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Safe area insets for PWA */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --sat: env(safe-area-inset-top);
+  --sar: env(safe-area-inset-right);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Base styles */
+html {
+  overscroll-behavior: none;
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+/* Safe area padding */
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.pt-safe {
+  padding-top: max(1rem, env(safe-area-inset-top));
+}
+
+/* Prevent text selection on tap targets */
+button, a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Better touch targets */
+.touch-target {
+  min-height: 48px;
+  min-width: 48px;
+}
+
+/* Modern card styles */
+@layer components {
+  .card {
+    @apply bg-white rounded-xl border border-gray-100 shadow-sm;
+    @apply transition-all duration-200 ease-out;
   }
+
+  .card:hover {
+    @apply shadow-md border-gray-200;
+  }
+
+  .card-interactive {
+    @apply card cursor-pointer;
+  }
+
+  .card-interactive:hover {
+    @apply -translate-y-0.5 shadow-lg;
+  }
+
+  .card-interactive:active {
+    @apply translate-y-0 shadow-md;
+  }
+
+  /* Modern button styles */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2;
+    @apply px-4 py-2.5 rounded-xl font-medium;
+    @apply transition-all duration-200 ease-out;
+    @apply focus:outline-none focus:ring-2 focus:ring-offset-2;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply min-h-[44px];
+  }
+
+  .btn-primary {
+    @apply btn bg-blue-600 text-white;
+    @apply hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/25;
+    @apply focus:ring-blue-500;
+    @apply active:bg-blue-800;
+  }
+
+  .btn-secondary {
+    @apply btn bg-gray-100 text-gray-700;
+    @apply hover:bg-gray-200;
+    @apply focus:ring-gray-500;
+    @apply active:bg-gray-300;
+  }
+
+  .btn-success {
+    @apply btn bg-green-600 text-white;
+    @apply hover:bg-green-700 hover:shadow-lg hover:shadow-green-500/25;
+    @apply focus:ring-green-500;
+    @apply active:bg-green-800;
+  }
+
+  .btn-danger {
+    @apply btn bg-red-600 text-white;
+    @apply hover:bg-red-700;
+    @apply focus:ring-red-500;
+    @apply active:bg-red-800;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-gray-600;
+    @apply hover:bg-gray-100 hover:text-gray-900;
+    @apply focus:ring-gray-500;
+  }
+
+  /* Modern input styles */
+  .input {
+    @apply w-full px-4 py-2.5 rounded-xl;
+    @apply border border-gray-200 bg-white;
+    @apply transition-all duration-200;
+    @apply focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500;
+    @apply placeholder:text-gray-400;
+    @apply min-h-[44px];
+  }
+
+  .input:hover:not(:focus) {
+    @apply border-gray-300;
+  }
+
+  /* Section header */
+  .section-header {
+    @apply text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3;
+  }
+
+  /* Page title */
+  .page-title {
+    @apply text-2xl font-bold text-gray-900 tracking-tight;
+  }
+}
+
+/* Slide up animation for install prompt */
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+/* Pulse animation for recording */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+/* Smooth page transitions */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+/* Focus visible for accessibility */
+:focus-visible {
+  @apply outline-none ring-2 ring-blue-500 ring-offset-2;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
+}
+
+/* Selection color */
+::selection {
+  @apply bg-blue-100 text-blue-900;
 }

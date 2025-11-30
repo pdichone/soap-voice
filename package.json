@@ -1,5 +1,5 @@
 {
-  "name": "temp-app",
+  "name": "soap-voice",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,18 +9,24 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.0",
+    "@supabase/ssr": "^0.8.0",
+    "@supabase/supabase-js": "^2.86.0",
+    "jspdf": "^3.0.4",
+    "next": "14.2.33",
+    "next-pwa": "^5.6.0",
     "react": "^18",
-    "react-dom": "^18",
-    "next": "14.2.33"
+    "react-dom": "^18"
   },
   "devDependencies": {
-    "typescript": "^5",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "canvas": "^3.2.0",
+    "eslint": "^8",
+    "eslint-config-next": "14.2.33",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
-    "eslint": "^8",
-    "eslint-config-next": "14.2.33"
+    "typescript": "^5"
   }
 }

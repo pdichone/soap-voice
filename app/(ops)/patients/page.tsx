@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import type { PatientWithStats } from '@/lib/types-ops';
+import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
 
 function PatientsContent() {
   const router = useRouter();
@@ -29,6 +30,14 @@ function PatientsContent() {
 
   useEffect(() => {
     loadPatients();
+    // Refresh data when page becomes visible (user navigates back)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadPatients();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   const loadPatients = async () => {
@@ -157,7 +166,7 @@ function PatientsContent() {
 
       {/* Patient List */}
       {loading ? (
-        <div className="text-center py-8 text-gray-500">Loading...</div>
+        <LoadingSpinner text="Loading patients..." />
       ) : filteredPatients.length > 0 ? (
         <div className="space-y-3">
           {filteredPatients.map((patient) => (
@@ -230,7 +239,7 @@ function UsersIcon({ className }: { className?: string }) {
 
 export default function PatientsPage() {
   return (
-    <Suspense fallback={<div className="p-4 text-center text-gray-500">Loading...</div>}>
+    <Suspense fallback={<PageLoading text="Loading patients..." />}>
       <PatientsContent />
     </Suspense>
   );

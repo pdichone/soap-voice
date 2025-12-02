@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatDate } from '@/lib/date-utils';
 import type { PatientNonPhi, ClaimNonPhi, ClaimStatus } from '@/lib/types-ops';
+import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
 
 interface ClaimWithPatient extends ClaimNonPhi {
   patient?: PatientNonPhi;
@@ -61,6 +62,14 @@ function ClaimsContent() {
 
   useEffect(() => {
     loadData();
+    // Refresh data when page becomes visible (user navigates back)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   const loadData = async () => {
@@ -68,22 +77,23 @@ function ClaimsContent() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data: claimsData } = await supabase
-      .from('claims_non_phi')
-      .select('*, patient:patients_non_phi(id, display_name, insurer_name)')
-      .eq('owner_user_id', user.id)
-      .order('date_of_service', { ascending: false });
+    // Run queries in parallel for faster loading
+    const [claimsResult, patientsResult] = await Promise.all([
+      supabase
+        .from('claims_non_phi')
+        .select('*, patient:patients_non_phi(id, display_name, insurer_name)')
+        .eq('owner_user_id', user.id)
+        .order('date_of_service', { ascending: false }),
+      supabase
+        .from('patients_non_phi')
+        .select('*')
+        .eq('owner_user_id', user.id)
+        .eq('is_active', true)
+        .order('display_name'),
+    ]);
 
-    setClaims(claimsData || []);
-
-    const { data: patientsData } = await supabase
-      .from('patients_non_phi')
-      .select('*')
-      .eq('owner_user_id', user.id)
-      .eq('is_active', true)
-      .order('display_name');
-
-    setPatients(patientsData || []);
+    setClaims(claimsResult.data || []);
+    setPatients(patientsResult.data || []);
     setLoading(false);
   };
 
@@ -347,7 +357,7 @@ function ClaimsContent() {
 
           <TabsContent value="pending" className="space-y-3 mt-4">
             {loading ? (
-              <div className="text-center py-8 text-gray-500">Loading...</div>
+              <LoadingSpinner text="Loading claims..." />
             ) : filterByPortal(pendingClaims).length > 0 ? (
               filterByPortal(pendingClaims).map((claim) => (
                 <ClaimCard
@@ -577,7 +587,7 @@ function ClaimCard({
 
 export default function ClaimsPage() {
   return (
-    <Suspense fallback={<div className="p-4 text-center text-gray-500">Loading...</div>}>
+    <Suspense fallback={<PageLoading text="Loading claims..." />}>
       <ClaimsContent />
     </Suspense>
   );

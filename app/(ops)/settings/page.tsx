@@ -31,6 +31,14 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadProfile();
+    // Refresh data when page becomes visible (user navigates back)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadProfile();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   const loadProfile = async () => {
@@ -87,7 +95,12 @@ export default function SettingsPage() {
   };
 
   if (loading) {
-    return <div className="p-4 text-center text-gray-500">Loading...</div>;
+    return (
+      <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        <p className="text-gray-500 animate-pulse">Loading settings...</p>
+      </div>
+    );
   }
 
   return (

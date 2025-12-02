@@ -24,7 +24,7 @@ const PAYMENT_METHODS = [
 
 const VISIT_LIMIT_TYPES = [
   { value: 'PER_REFERRAL', label: 'Per Referral' },
-  { value: 'PER_CALENDAR_YEAR', label: 'Per Calendar Year' },
+  { value: 'PER_YEAR', label: 'Per Calendar Year' },
   { value: 'UNLIMITED', label: 'Unlimited' },
 ];
 
@@ -62,54 +62,43 @@ export default function PatientDetailPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Load patient
-    const { data: patientData } = await supabase
-      .from('patients_non_phi')
-      .select('*')
-      .eq('id', id)
-      .eq('owner_user_id', user.id)
-      .single();
+    // Run all queries in parallel for faster loading
+    const [patientResult, visitsResult, claimsResult, referralsResult, paymentsResult] = await Promise.all([
+      supabase
+        .from('patients_non_phi')
+        .select('*')
+        .eq('id', id)
+        .eq('owner_user_id', user.id)
+        .single(),
+      supabase
+        .from('visits_non_phi')
+        .select('*')
+        .eq('patient_id', id)
+        .order('visit_date', { ascending: false }),
+      supabase
+        .from('claims_non_phi')
+        .select('*')
+        .eq('patient_id', id)
+        .order('date_of_service', { ascending: false }),
+      supabase
+        .from('referrals_non_phi')
+        .select('*')
+        .eq('patient_id', id)
+        .order('referral_start_date', { ascending: false }),
+      supabase
+        .from('payments_non_phi')
+        .select('*')
+        .eq('patient_id', id)
+        .order('created_at', { ascending: false }),
+    ]);
 
-    if (patientData) {
-      setPatient(patientData);
+    if (patientResult.data) {
+      setPatient(patientResult.data);
     }
-
-    // Load visits
-    const { data: visitsData } = await supabase
-      .from('visits_non_phi')
-      .select('*')
-      .eq('patient_id', id)
-      .order('visit_date', { ascending: false });
-
-    setVisits(visitsData || []);
-
-    // Load claims
-    const { data: claimsData } = await supabase
-      .from('claims_non_phi')
-      .select('*')
-      .eq('patient_id', id)
-      .order('date_of_service', { ascending: false });
-
-    setClaims(claimsData || []);
-
-    // Load referrals
-    const { data: referralsData } = await supabase
-      .from('referrals_non_phi')
-      .select('*')
-      .eq('patient_id', id)
-      .order('referral_start_date', { ascending: false });
-
-    setReferrals(referralsData || []);
-
-    // Load payments
-    const { data: paymentsData } = await supabase
-      .from('payments_non_phi')
-      .select('*')
-      .eq('patient_id', id)
-      .order('created_at', { ascending: false });
-
-    setPayments(paymentsData || []);
-
+    setVisits(visitsResult.data || []);
+    setClaims(claimsResult.data || []);
+    setReferrals(referralsResult.data || []);
+    setPayments(paymentsResult.data || []);
     setLoading(false);
   }, [id]);
 
@@ -232,7 +221,12 @@ export default function PatientDetailPage() {
   };
 
   if (loading) {
-    return <div className="p-4 text-center text-gray-500">Loading...</div>;
+    return (
+      <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        <p className="text-gray-500 animate-pulse">Loading patient...</p>
+      </div>
+    );
   }
 
   if (!patient) {

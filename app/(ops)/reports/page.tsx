@@ -35,6 +35,15 @@ export default function ReportsPage() {
 
   useEffect(() => {
     loadData();
+    // Refresh data when page becomes visible (user navigates back)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+        loadBreakdown();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   useEffect(() => {
@@ -143,12 +152,9 @@ export default function ReportsPage() {
 
   if (loading) {
     return (
-      <div className="p-4 space-y-4">
-        <div className="h-8 bg-gray-200 rounded animate-pulse w-32"></div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="h-24 bg-gray-100 rounded-lg animate-pulse"></div>
-          <div className="h-24 bg-gray-100 rounded-lg animate-pulse"></div>
-        </div>
+      <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        <p className="text-gray-500 animate-pulse">Loading reports...</p>
       </div>
     );
   }

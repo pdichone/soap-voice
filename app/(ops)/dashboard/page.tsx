@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import Link from 'next/link';
 import {
   getDashboardSummary,
@@ -91,7 +93,7 @@ export default async function DashboardPage() {
         <div className="flex gap-2">
           <Link href="/patients?action=new">
             <Button variant="outline" size="sm">
-              + New Client
+              + New Patient
             </Button>
           </Link>
           <Link href="/visits?action=new">
@@ -232,7 +234,7 @@ export default async function DashboardPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-200">
-                        <th className="text-left py-2 text-xs font-medium text-gray-500 uppercase">Client</th>
+                        <th className="text-left py-2 text-xs font-medium text-gray-500 uppercase">Patient</th>
                         <th className="text-left py-2 text-xs font-medium text-gray-500 uppercase">Payer</th>
                         <th className="text-left py-2 text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">DOS</th>
                         <th className="text-right py-2 text-xs font-medium text-gray-500 uppercase">Amount</th>
@@ -467,7 +469,7 @@ export default async function DashboardPage() {
             <div className="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center">
               <UserIcon className="w-5 h-5 text-green-600" />
             </div>
-            <span className="text-sm font-medium text-gray-900">New Client</span>
+            <span className="text-sm font-medium text-gray-900">New Patient</span>
           </Link>
 
           <Link

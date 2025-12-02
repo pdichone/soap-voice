@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { PatientNonPhi, PaymentNonPhi } from '@/lib/types-ops';
+import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
 
 interface PaymentWithPatient extends PaymentNonPhi {
   patient?: PatientNonPhi;
@@ -45,6 +46,14 @@ function PaymentsContent() {
 
   useEffect(() => {
     loadData();
+    // Refresh data when page becomes visible (user navigates back)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   const loadData = async () => {
@@ -52,33 +61,36 @@ function PaymentsContent() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data: paymentsData } = await supabase
-      .from('payments_non_phi')
-      .select('*, patient:patients_non_phi(id, display_name)')
-      .eq('owner_user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(50);
+    // Run queries in parallel for faster loading
+    const [paymentsResult, patientsResult] = await Promise.all([
+      supabase
+        .from('payments_non_phi')
+        .select('*, patient:patients_non_phi(id, display_name)')
+        .eq('owner_user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(50),
+      supabase
+        .from('patients_non_phi')
+        .select('*')
+        .eq('owner_user_id', user.id)
+        .eq('is_active', true)
+        .order('display_name'),
+    ]);
 
-    setPayments(paymentsData || []);
+    const paymentsData = paymentsResult.data || [];
+    setPayments(paymentsData);
 
     // Calculate monthly total
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const monthPayments = (paymentsData || []).filter(
+    const monthPayments = paymentsData.filter(
       (p) => new Date(p.created_at) >= startOfMonth
     );
     setMonthlyTotal(monthPayments.reduce((sum, p) => sum + p.amount, 0));
 
-    const { data: patientsData } = await supabase
-      .from('patients_non_phi')
-      .select('*')
-      .eq('owner_user_id', user.id)
-      .eq('is_active', true)
-      .order('display_name');
-
-    setPatients(patientsData || []);
+    setPatients(patientsResult.data || []);
     setLoading(false);
   };
 
@@ -220,7 +232,7 @@ function PaymentsContent() {
 
       {/* Payment List */}
       {loading ? (
-        <div className="text-center py-8 text-gray-500">Loading...</div>
+        <LoadingSpinner text="Loading payments..." />
       ) : Object.keys(groupedPayments).length > 0 ? (
         <div className="space-y-6">
           {Object.entries(groupedPayments).map(([date, datePayments]) => (
@@ -285,7 +297,7 @@ function DollarIcon({ className }: { className?: string }) {
 
 export default function PaymentsPage() {
   return (
-    <Suspense fallback={<div className="p-4 text-center text-gray-500">Loading...</div>}>
+    <Suspense fallback={<PageLoading text="Loading payments..." />}>
       <PaymentsContent />
     </Suspense>
   );

@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getLocalDateString, formatDate } from '@/lib/date-utils';
 import type { PatientNonPhi, VisitNonPhi } from '@/lib/types-ops';
+import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
 
 interface VisitWithPatient extends VisitNonPhi {
   patient?: PatientNonPhi;
@@ -55,6 +56,14 @@ function VisitsContent() {
 
   useEffect(() => {
     loadData();
+    // Refresh data when page becomes visible (user navigates back)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   const loadData = async () => {
@@ -62,36 +71,35 @@ function VisitsContent() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Load visits with patient info
-    const { data: visitsData } = await supabase
-      .from('visits_non_phi')
-      .select('*, patient:patients_non_phi(id, display_name)')
-      .eq('owner_user_id', user.id)
-      .order('visit_date', { ascending: false })
-      .limit(50);
-
-    setVisits(visitsData || []);
-
-    // Load patients for dropdown
-    const { data: patientsData } = await supabase
-      .from('patients_non_phi')
-      .select('*')
-      .eq('owner_user_id', user.id)
-      .eq('is_active', true)
-      .order('display_name');
-
-    // Load all active referrals
     const today = getLocalDateString();
-    const { data: referralsData } = await supabase
-      .from('referrals_non_phi')
-      .select('*')
-      .eq('owner_user_id', user.id)
-      .or(`referral_expiration_date.is.null,referral_expiration_date.gte.${today}`)
-      .order('referral_start_date', { ascending: false });
+
+    // Run all queries in parallel for faster loading
+    const [visitsResult, patientsResult, referralsResult] = await Promise.all([
+      supabase
+        .from('visits_non_phi')
+        .select('*, patient:patients_non_phi(id, display_name)')
+        .eq('owner_user_id', user.id)
+        .order('visit_date', { ascending: false })
+        .limit(50),
+      supabase
+        .from('patients_non_phi')
+        .select('*')
+        .eq('owner_user_id', user.id)
+        .eq('is_active', true)
+        .order('display_name'),
+      supabase
+        .from('referrals_non_phi')
+        .select('*')
+        .eq('owner_user_id', user.id)
+        .or(`referral_expiration_date.is.null,referral_expiration_date.gte.${today}`)
+        .order('referral_start_date', { ascending: false }),
+    ]);
+
+    setVisits(visitsResult.data || []);
 
     // Associate each patient with their active referral
-    const patientsWithReferrals = (patientsData || []).map(patient => {
-      const activeReferral = (referralsData || []).find(r => r.patient_id === patient.id);
+    const patientsWithReferrals = (patientsResult.data || []).map(patient => {
+      const activeReferral = (referralsResult.data || []).find(r => r.patient_id === patient.id);
       return {
         ...patient,
         activeReferralId: activeReferral?.id || null,
@@ -308,7 +316,7 @@ function VisitsContent() {
 
       {/* Visit List */}
       {loading ? (
-        <div className="text-center py-8 text-gray-500">Loading...</div>
+        <LoadingSpinner text="Loading visits..." />
       ) : Object.keys(groupedVisits).length > 0 ? (
         <div className="space-y-6">
           {Object.entries(groupedVisits).map(([date, dateVisits]) => (
@@ -365,7 +373,7 @@ function CalendarIcon({ className }: { className?: string }) {
 
 export default function VisitsPage() {
   return (
-    <Suspense fallback={<div className="p-4 text-center text-gray-500">Loading...</div>}>
+    <Suspense fallback={<PageLoading text="Loading visits..." />}>
       <VisitsContent />
     </Suspense>
   );

@@ -188,6 +188,23 @@ button, a {
   animation: fade-in 0.3s ease-out;
 }
 
+/* Loading bar animation */
+@keyframes loading-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.animate-loading-bar {
+  animation: loading-bar 1.5s ease-in-out infinite;
+}
+
 /* Focus visible for accessibility */
 :focus-visible {
   @apply outline-none ring-2 ring-primary ring-offset-2;

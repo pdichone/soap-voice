@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ReferralUpload } from '@/components/ReferralUpload';
-import { ReferralCard } from '@/components/ReferralCard';
+import { ReferralUpload } from '@/components/clinical/ReferralUpload';
+import { ReferralCard } from '@/components/clinical/ReferralCard';
 import type { Referral, ReferringProvider } from '@/lib/types';
 
 interface ClientReferralsProps {

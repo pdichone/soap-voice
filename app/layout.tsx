@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
+import { Inter, Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 
 const inter = Inter({
@@ -8,14 +8,21 @@ const inter = Inter({
   variable: '--font-inter',
 });
 
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  weight: ['600', '700'],
+  display: 'swap',
+  variable: '--font-heading',
+});
+
 export const metadata: Metadata = {
-  title: 'SOAP Voice',
-  description: 'Voice-to-SOAP notes for massage therapists',
+  title: 'BodyWorkFlow',
+  description: 'Practice management for massage therapists and bodyworkers',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'SOAP Voice',
+    title: 'BodyWorkFlow',
   },
 };
 
@@ -24,7 +31,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: '#2563eb',
+  themeColor: '#3B8C7A',
 };
 
 export default function RootLayout({
@@ -33,8 +40,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={inter.variable}>
-      <body className={`${inter.className} antialiased bg-gray-50 text-gray-900`}>
+    <html lang="en" className={`${inter.variable} ${jakarta.variable}`}>
+      <body className={`${inter.className} antialiased`}>
         {children}
       </body>
     </html>

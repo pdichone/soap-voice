@@ -5,8 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
-import { RecordButton } from '@/components/RecordButton';
-import { SOAPNote } from '@/components/SOAPNote';
+import { RecordButton } from '@/components/clinical/RecordButton';
+import { SOAPNote } from '@/components/clinical/SOAPNote';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import type { Client, SOAPNote as SOAPNoteType } from '@/lib/types';
 

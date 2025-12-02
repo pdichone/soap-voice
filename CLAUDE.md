@@ -83,3 +83,6 @@ The AI generates structured notes with:
 - **Plan**: Recommendations, home care, follow-up timing
 - save this analyzis for later
 - save this as well for later
+- save this plan for the future
+- save thse latest finding and analysis so we have for later.
+- save these stats as well

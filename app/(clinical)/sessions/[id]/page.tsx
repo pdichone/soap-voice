@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createServerSupabaseClient } from '@/lib/supabase-server';
-import { SOAPNote } from '@/components/SOAPNote';
-import { ExportPDFButton } from '@/components/ExportPDFButton';
+import { SOAPNote } from '@/components/clinical/SOAPNote';
+import { ExportPDFButton } from '@/components/clinical/ExportPDFButton';
 import type { Client } from '@/lib/types';
 
 interface Props {

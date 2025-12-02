@@ -1,11 +1,11 @@
 {
-  "name": "SOAP Voice",
-  "short_name": "SOAP Voice",
-  "description": "Voice-to-SOAP notes for massage therapists",
+  "name": "BodyWorkFlow",
+  "short_name": "BodyWorkFlow",
+  "description": "Practice management for massage therapists and bodyworkers",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f9fafb",
-  "theme_color": "#2563eb",
+  "background_color": "#F8FAF9",
+  "theme_color": "#3B8C7A",
   "orientation": "portrait",
   "icons": [
     {

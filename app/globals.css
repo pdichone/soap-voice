@@ -76,17 +76,17 @@ button, a {
   }
 
   .btn-primary {
-    @apply btn bg-blue-600 text-white;
-    @apply hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/25;
-    @apply focus:ring-blue-500;
-    @apply active:bg-blue-800;
+    @apply btn bg-primary text-primary-foreground;
+    @apply hover:brightness-110 hover:shadow-lg hover:shadow-primary/25;
+    @apply focus:ring-primary;
+    @apply active:brightness-90;
   }
 
   .btn-secondary {
-    @apply btn bg-gray-100 text-gray-700;
-    @apply hover:bg-gray-200;
-    @apply focus:ring-gray-500;
-    @apply active:bg-gray-300;
+    @apply btn bg-secondary text-secondary-foreground;
+    @apply hover:bg-muted;
+    @apply focus:ring-primary;
+    @apply active:bg-muted/80;
   }
 
   .btn-success {
@@ -112,10 +112,10 @@ button, a {
   /* Modern input styles */
   .input {
     @apply w-full px-4 py-2.5 rounded-xl;
-    @apply border border-gray-200 bg-white;
+    @apply border border-border bg-white;
     @apply transition-all duration-200;
-    @apply focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500;
-    @apply placeholder:text-gray-400;
+    @apply focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary;
+    @apply placeholder:text-muted-foreground;
     @apply min-h-[44px];
   }
 
@@ -130,7 +130,13 @@ button, a {
 
   /* Page title */
   .page-title {
-    @apply text-2xl font-bold text-gray-900 tracking-tight;
+    @apply text-2xl font-bold text-foreground tracking-tight;
+    font-family: var(--font-heading), system-ui, sans-serif;
+  }
+
+  /* Heading font family */
+  h1, h2, h3, h4, .font-heading {
+    font-family: var(--font-heading), system-ui, sans-serif;
   }
 }
 
@@ -184,7 +190,7 @@ button, a {
 
 /* Focus visible for accessibility */
 :focus-visible {
-  @apply outline-none ring-2 ring-blue-500 ring-offset-2;
+  @apply outline-none ring-2 ring-primary ring-offset-2;
 }
 
 /* Custom scrollbar */
@@ -207,5 +213,71 @@ button, a {
 
 /* Selection color */
 ::selection {
-  @apply bg-blue-100 text-blue-900;
+  @apply bg-primary/20 text-primary;
+}
+
+@layer base {
+  :root {
+    /* Calm Teal/Sage palette for LMT & Bodyworker OS */
+    --background: 150 20% 98%;
+    --foreground: 166 20% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 166 20% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 166 20% 15%;
+    --primary: 166 45% 40%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 150 15% 94%;
+    --secondary-foreground: 166 20% 15%;
+    --muted: 150 15% 94%;
+    --muted-foreground: 166 15% 45%;
+    --accent: 35 65% 55%;
+    --accent-foreground: 35 80% 15%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 150 15% 88%;
+    --input: 150 15% 88%;
+    --ring: 166 45% 40%;
+    --chart-1: 166 45% 40%;
+    --chart-2: 35 65% 55%;
+    --chart-3: 152 60% 40%;
+    --chart-4: 150 30% 60%;
+    --chart-5: 166 30% 55%;
+    --radius: 0.5rem;
+  }
+  .dark {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 0 0% 83.1%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
 }

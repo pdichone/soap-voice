@@ -1,0 +1,11 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="24" cy="24" r="22" fill="#3B8C7A"/>
+
+  <!-- Flow waves (white) -->
+  <path d="M10 24C10 24 14 16 20 16C26 16 28 24 34 24C40 24 42 16 42 16" stroke="white" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <path d="M10 32C10 32 14 24 20 24C26 24 28 32 34 32C40 32 42 24 42 24" stroke="white" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.7"/>
+
+  <!-- Accent dot -->
+  <circle cx="38" cy="12" r="4" fill="#D4A574"/>
+</svg>

@@ -1,5 +1,5 @@
 import { createServerSupabaseClient } from '@/lib/supabase-server';
-import { ClientsList } from '@/components/ClientsList';
+import { ClientsList } from '@/components/clinical/ClientsList';
 
 export default async function ClientsPage() {
   const supabase = await createServerSupabaseClient();

@@ -3,8 +3,8 @@
 import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ClientCard } from '@/components/ClientCard';
-import { CSVUpload } from '@/components/CSVUpload';
+import { ClientCard } from '@/components/clinical/ClientCard';
+import { CSVUpload } from '@/components/clinical/CSVUpload';
 import type { Client } from '@/lib/types';
 
 interface ClientsListProps {

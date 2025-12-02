@@ -1,0 +1,16 @@
+<svg width="280" height="56" viewBox="0 0 280 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Icon: Abstract body/flow waves -->
+  <g>
+    <!-- Flow wave 1 -->
+    <path d="M8 28C8 28 14 18 22 18C30 18 32 28 40 28C48 28 50 18 50 18" stroke="#3B8C7A" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <!-- Flow wave 2 -->
+    <path d="M8 38C8 38 14 28 22 28C30 28 32 38 40 38C48 38 50 28 50 28" stroke="#3B8C7A" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.6"/>
+    <!-- Healing hands circle -->
+    <circle cx="29" cy="28" r="20" stroke="#3B8C7A" stroke-width="2.5" fill="none" opacity="0.3"/>
+  </g>
+
+  <!-- Text: BodyWorkFlow -->
+  <text x="62" y="38" font-family="Plus Jakarta Sans, system-ui, sans-serif" font-size="28" font-weight="700" fill="#1a3a32">
+    <tspan fill="#3B8C7A">Body</tspan><tspan fill="#1a3a32">Work</tspan><tspan fill="#D4A574">Flow</tspan>
+  </text>
+</svg>

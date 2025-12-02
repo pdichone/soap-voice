@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createServerSupabaseClient } from '@/lib/supabase-server';
-import { ClientReferrals } from '@/components/ClientReferrals';
+import { ClientReferrals } from '@/components/clinical/ClientReferrals';
 import type { Session, ReferringProvider, Referral } from '@/lib/types';
 
 interface Props {

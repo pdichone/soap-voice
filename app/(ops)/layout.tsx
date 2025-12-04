@@ -1,4 +1,5 @@
 import { OpsNav } from '@/components/ops/OpsNav';
+import { OpsProviders } from '@/components/ops/OpsProviders';
 import { InstallPrompt } from '@/components/InstallPrompt';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -9,31 +10,33 @@ export default function OpsLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-background pb-20">
-      {/* Top header bar */}
-      <header className="sticky top-0 z-30 bg-white border-b border-border">
-        <div className="flex items-center justify-between px-4 h-14">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <Image src="/logo-icon.svg" alt="BodyWorkFlow" width={32} height={32} />
-            <span className="font-heading font-bold text-lg">
-              <span className="text-primary">Body</span>
-              <span className="text-foreground">Work</span>
-              <span className="text-accent">Flow</span>
-            </span>
-          </Link>
-          <Link
-            href="/settings"
-            className="p-2 text-gray-500 hover:text-gray-700 transition-colors"
-          >
-            <SettingsIcon className="w-5 h-5" />
-          </Link>
-        </div>
-      </header>
+    <OpsProviders>
+      <div className="min-h-screen bg-background pb-20">
+        {/* Top header bar */}
+        <header className="sticky top-0 z-30 bg-white border-b border-border">
+          <div className="flex items-center justify-between px-4 h-14">
+            <Link href="/dashboard" className="flex items-center gap-2">
+              <Image src="/logo-icon.svg" alt="BodyWorkFlow" width={32} height={32} />
+              <span className="font-heading font-bold text-lg">
+                <span className="text-primary">Body</span>
+                <span className="text-foreground">Work</span>
+                <span className="text-accent">Flow</span>
+              </span>
+            </Link>
+            <Link
+              href="/settings"
+              className="p-2 text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              <SettingsIcon className="w-5 h-5" />
+            </Link>
+          </div>
+        </header>
 
-      <main className="pt-safe">{children}</main>
-      <OpsNav />
-      <InstallPrompt />
-    </div>
+        <main className="pt-safe">{children}</main>
+        <OpsNav />
+        <InstallPrompt />
+      </div>
+    </OpsProviders>
   );
 }
 

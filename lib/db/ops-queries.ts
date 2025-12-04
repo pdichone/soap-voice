@@ -9,13 +9,17 @@ import type {
   ClaimWithPatient,
   DashboardSummary,
   Profile,
+  Practice,
+  PracticeType,
   EarningsSummary,
   WeeklyEarning,
   MonthlyEarning,
   YearlyEarning,
   PaymentExport,
   PaymentMethodBreakdown,
+  PatientBenefits,
 } from '@/lib/types-ops';
+import { getCollectAmount } from '@/lib/benefits-calculator';
 
 // =============================================
 // TIMEZONE HELPERS
@@ -84,6 +88,117 @@ export async function updateProfile(updates: Partial<Profile>): Promise<Profile 
     .from('profiles')
     .update(updates)
     .eq('id', user.id)
+    .select()
+    .single();
+
+  return data;
+}
+
+// =============================================
+// PRACTICE CONFIG QUERIES
+// =============================================
+
+interface PracticeFeatures {
+  showClaims: boolean;
+  showReferrals: boolean;
+  showInsuranceFields: boolean;
+  showSupervisorApproval: boolean;
+  showStudentManagement: boolean;
+  patientLabel: string;
+  patientLabelPlural: string;
+  visitLabel: string;
+  visitLabelPlural: string;
+}
+
+const PRACTICE_FEATURES: Record<PracticeType, PracticeFeatures> = {
+  cash_only: {
+    showClaims: false,
+    showReferrals: false,
+    showInsuranceFields: false,
+    showSupervisorApproval: false,
+    showStudentManagement: false,
+    patientLabel: 'Client',
+    patientLabelPlural: 'Clients',
+    visitLabel: 'Session',
+    visitLabelPlural: 'Sessions',
+  },
+  insurance: {
+    showClaims: true,
+    showReferrals: true,
+    showInsuranceFields: true,
+    showSupervisorApproval: false,
+    showStudentManagement: false,
+    patientLabel: 'Patient',
+    patientLabelPlural: 'Patients',
+    visitLabel: 'Visit',
+    visitLabelPlural: 'Visits',
+  },
+  school: {
+    showClaims: false,
+    showReferrals: false,
+    showInsuranceFields: false,
+    showSupervisorApproval: true,
+    showStudentManagement: true,
+    patientLabel: 'Client',
+    patientLabelPlural: 'Clients',
+    visitLabel: 'Session',
+    visitLabelPlural: 'Sessions',
+  },
+};
+
+export interface PracticeConfig {
+  practice: Practice | null;
+  practiceType: PracticeType;
+  features: PracticeFeatures;
+}
+
+export async function getPracticeConfig(): Promise<PracticeConfig> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  // Default config for insurance practice type
+  const defaultConfig: PracticeConfig = {
+    practice: null,
+    practiceType: 'insurance',
+    features: PRACTICE_FEATURES['insurance'],
+  };
+
+  if (!user) return defaultConfig;
+
+  // Get user's profile to find their practice_id
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('practice_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile?.practice_id) return defaultConfig;
+
+  // Fetch the practice details
+  const { data: practice } = await supabase
+    .from('practices')
+    .select('*')
+    .eq('id', profile.practice_id)
+    .single();
+
+  if (!practice) return defaultConfig;
+
+  const practiceType = practice.practice_type as PracticeType;
+
+  return {
+    practice,
+    practiceType,
+    features: PRACTICE_FEATURES[practiceType],
+  };
+}
+
+export async function updatePracticeType(practiceId: string, practiceType: PracticeType): Promise<Practice | null> {
+  const supabase = await createServerSupabaseClient();
+
+  const { data } = await supabase
+    .from('practices')
+    .update({ practice_type: practiceType })
+    .eq('id', practiceId)
     .select()
     .single();
 
@@ -498,6 +613,89 @@ export async function getTodaysVisits(): Promise<(VisitNonPhi & { patient?: Pati
   return data || [];
 }
 
+export interface VisitWithCollection extends VisitNonPhi {
+  patient?: PatientNonPhi;
+  collectAmount: number;
+  paidAmount: number | null; // Actual payment made for this visit (null if no payment yet)
+}
+
+export async function getTodaysVisitsWithCollections(): Promise<VisitWithCollection[]> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  // Get user's timezone from profile
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('timezone')
+    .eq('id', user.id)
+    .single();
+
+  const timezone = profile?.timezone || 'America/Los_Angeles';
+  const today = getDateInTimezone(timezone);
+
+  // Get today's visits with patient info
+  const { data: visits } = await supabase
+    .from('visits_non_phi')
+    .select('*, patient:patients_non_phi(*)')
+    .eq('owner_user_id', user.id)
+    .eq('visit_date', today)
+    .order('created_at', { ascending: true });
+
+  if (!visits || visits.length === 0) return [];
+
+  // Get visit IDs to fetch associated payments
+  const visitIds = visits.map(v => v.id);
+
+  // Fetch payments for these visits
+  const { data: paymentsData } = await supabase
+    .from('payments_non_phi')
+    .select('visit_id, amount')
+    .in('visit_id', visitIds);
+
+  // Create a map of visit_id to payment amount
+  const paymentsMap = new Map<string, number>();
+  (paymentsData || []).forEach(p => {
+    if (p.visit_id) {
+      // Sum payments if there are multiple for the same visit
+      const existing = paymentsMap.get(p.visit_id) || 0;
+      paymentsMap.set(p.visit_id, existing + p.amount);
+    }
+  });
+
+  // Get unique patient IDs
+  const patientIds = Array.from(new Set(visits.map(v => v.patient_id).filter(Boolean)));
+
+  // Fetch benefits for all patients in one query
+  const { data: benefitsData } = await supabase
+    .from('patient_benefits')
+    .select('*')
+    .in('patient_id', patientIds);
+
+  // Create a map of patient_id to benefits
+  const benefitsMap = new Map<string, PatientBenefits>();
+  (benefitsData || []).forEach(b => benefitsMap.set(b.patient_id, b as PatientBenefits));
+
+  // Calculate collection amount for each visit
+  return visits.map(visit => {
+    const patient = visit.patient as PatientNonPhi | undefined;
+    const benefits = patient ? benefitsMap.get(patient.id) || null : null;
+    const paidAmount = paymentsMap.get(visit.id) || null;
+
+    // Calculate collect amount using the benefits calculator
+    const collection = patient
+      ? getCollectAmount(patient, benefits)
+      : { collect_amount: 0 };
+
+    return {
+      ...visit,
+      patient,
+      collectAmount: collection.collect_amount,
+      paidAmount,
+    };
+  });
+}
+
 export async function getTodaysPayments(): Promise<(PaymentNonPhi & { patient?: PatientNonPhi })[]> {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -804,6 +1002,32 @@ export async function getClaimsPaidThisWeek(): Promise<number> {
   return count || 0;
 }
 
+export async function getInsurancePaymentsThisWeek(): Promise<number> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return 0;
+
+  // Get user's timezone from profile
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('timezone')
+    .eq('id', user.id)
+    .single();
+
+  const timezone = profile?.timezone || 'America/Los_Angeles';
+  const { date: startOfWeekDate } = getStartOfWeekInTimezone(timezone);
+
+  // Get all paid claims this week - use paid_amount if available, otherwise billed_amount
+  const { data } = await supabase
+    .from('claims_non_phi')
+    .select('paid_amount, billed_amount')
+    .eq('owner_user_id', user.id)
+    .eq('status', 'PAID')
+    .gte('date_paid', startOfWeekDate);
+
+  return data?.reduce((sum, c) => sum + (c.paid_amount ?? c.billed_amount ?? 0), 0) || 0;
+}
+
 export async function getReferralAlerts(): Promise<{
   critical: { patient: PatientNonPhi; referral: ReferralNonPhi; visitsUsed: number; reason: string }[];
   warning: { patient: PatientNonPhi; referral: ReferralNonPhi; visitsUsed: number; reason: string }[];
@@ -983,13 +1207,50 @@ export async function getEarningsSummary(): Promise<EarningsSummary> {
     .gte('created_at', new Date(`${lastYearStart}T00:00:00`).toISOString())
     .lte('created_at', lastYearEnd);
 
+  // Insurance payments from paid claims (based on date_paid)
+  // Use paid_amount if available, otherwise fall back to billed_amount
+  // This week insurance
+  const { data: thisWeekInsurance } = await supabase
+    .from('claims_non_phi')
+    .select('paid_amount, billed_amount')
+    .eq('owner_user_id', user.id)
+    .eq('status', 'PAID')
+    .gte('date_paid', thisWeekStart);
+
+  // This month insurance
+  const { data: thisMonthInsurance } = await supabase
+    .from('claims_non_phi')
+    .select('paid_amount, billed_amount')
+    .eq('owner_user_id', user.id)
+    .eq('status', 'PAID')
+    .gte('date_paid', thisMonthStart);
+
+  // This year insurance
+  const { data: thisYearInsurance } = await supabase
+    .from('claims_non_phi')
+    .select('paid_amount, billed_amount')
+    .eq('owner_user_id', user.id)
+    .eq('status', 'PAID')
+    .gte('date_paid', thisYearStart);
+
+  const patientThisWeek = thisWeekPayments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+  const patientThisMonth = thisMonthPayments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+  const patientThisYear = thisYearPayments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+
+  const insuranceThisWeek = thisWeekInsurance?.reduce((sum, c) => sum + (c.paid_amount ?? c.billed_amount ?? 0), 0) || 0;
+  const insuranceThisMonth = thisMonthInsurance?.reduce((sum, c) => sum + (c.paid_amount ?? c.billed_amount ?? 0), 0) || 0;
+  const insuranceThisYear = thisYearInsurance?.reduce((sum, c) => sum + (c.paid_amount ?? c.billed_amount ?? 0), 0) || 0;
+
   return {
-    thisWeek: thisWeekPayments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0,
+    thisWeek: patientThisWeek + insuranceThisWeek,
     lastWeek: lastWeekPayments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0,
-    thisMonth: thisMonthPayments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0,
+    thisMonth: patientThisMonth + insuranceThisMonth,
     lastMonth: lastMonthPayments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0,
-    thisYear: thisYearPayments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0,
+    thisYear: patientThisYear + insuranceThisYear,
     lastYear: lastYearPayments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0,
+    insuranceThisWeek,
+    insuranceThisMonth,
+    insuranceThisYear,
   };
 }
 
@@ -1030,6 +1291,16 @@ export async function getWeeklyEarnings(weeks: number = 8): Promise<WeeklyEarnin
       .gte('created_at', weekStartISO)
       .lte('created_at', weekEndISO);
 
+    // Get insurance payments (paid claims) for this week
+    // Use paid_amount if available, otherwise fall back to billed_amount
+    const { data: paidClaims } = await supabase
+      .from('claims_non_phi')
+      .select('paid_amount, billed_amount')
+      .eq('owner_user_id', user.id)
+      .eq('status', 'PAID')
+      .gte('date_paid', weekStart)
+      .lte('date_paid', weekEnd);
+
     // Get visits for this week
     const { count: visitCount } = await supabase
       .from('visits_non_phi')
@@ -1038,17 +1309,19 @@ export async function getWeeklyEarnings(weeks: number = 8): Promise<WeeklyEarnin
       .gte('visit_date', weekStart)
       .lte('visit_date', weekEnd);
 
-    const total = payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+    const patientTotal = payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
     const copays = payments?.filter(p => p.is_copay).reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
-    const otherPayments = total - copays;
+    const otherPayments = patientTotal - copays;
+    const insurancePayments = paidClaims?.reduce((sum, c) => sum + (c.paid_amount ?? c.billed_amount ?? 0), 0) || 0;
 
     results.push({
       weekStart,
       weekEnd,
-      total,
+      total: patientTotal + insurancePayments,
       visitCount: visitCount || 0,
       copays,
       otherPayments,
+      insurancePayments,
     });
   }
 
@@ -1084,6 +1357,7 @@ export async function getMonthlyEarnings(months: number = 12): Promise<MonthlyEa
     // Get end of month
     const nextMonth = new Date(currentDate);
     nextMonth.setMonth(nextMonth.getMonth() + 1);
+    const monthEndDate = new Date(nextMonth.getTime() - 1).toISOString().split('T')[0];
 
     const monthStartISO = new Date(`${monthStart}T00:00:00`).toISOString();
 
@@ -1095,8 +1369,17 @@ export async function getMonthlyEarnings(months: number = 12): Promise<MonthlyEa
       .gte('created_at', monthStartISO)
       .lt('created_at', nextMonth.toISOString());
 
+    // Get insurance payments (paid claims) for this month
+    // Use paid_amount if available, otherwise fall back to billed_amount
+    const { data: paidClaims } = await supabase
+      .from('claims_non_phi')
+      .select('paid_amount, billed_amount')
+      .eq('owner_user_id', user.id)
+      .eq('status', 'PAID')
+      .gte('date_paid', monthStart)
+      .lte('date_paid', monthEndDate);
+
     // Get visits for this month
-    const monthEndDate = new Date(nextMonth.getTime() - 1).toISOString().split('T')[0];
     const { count: visitCount } = await supabase
       .from('visits_non_phi')
       .select('*', { count: 'exact', head: true })
@@ -1104,19 +1387,21 @@ export async function getMonthlyEarnings(months: number = 12): Promise<MonthlyEa
       .gte('visit_date', monthStart)
       .lte('visit_date', monthEndDate);
 
-    const total = payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+    const patientTotal = payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
     const copays = payments?.filter(p => p.is_copay).reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
-    const otherPayments = total - copays;
+    const otherPayments = patientTotal - copays;
+    const insurancePayments = paidClaims?.reduce((sum, c) => sum + (c.paid_amount ?? c.billed_amount ?? 0), 0) || 0;
 
     const monthLabel = `${monthNames[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
 
     results.push({
       month,
       monthLabel,
-      total,
+      total: patientTotal + insurancePayments,
       visitCount: visitCount || 0,
       copays,
       otherPayments,
+      insurancePayments,
     });
   }
 
@@ -1157,6 +1442,16 @@ export async function getYearlyEarnings(): Promise<YearlyEarning[]> {
       .gte('created_at', yearStartISO)
       .lte('created_at', yearEndISO);
 
+    // Get insurance payments (paid claims) for this year
+    // Use paid_amount if available, otherwise fall back to billed_amount
+    const { data: paidClaims } = await supabase
+      .from('claims_non_phi')
+      .select('paid_amount, billed_amount')
+      .eq('owner_user_id', user.id)
+      .eq('status', 'PAID')
+      .gte('date_paid', yearStart)
+      .lte('date_paid', yearEnd);
+
     // Get visits for this year
     const { count: visitCount } = await supabase
       .from('visits_non_phi')
@@ -1165,18 +1460,20 @@ export async function getYearlyEarnings(): Promise<YearlyEarning[]> {
       .gte('visit_date', yearStart)
       .lte('visit_date', yearEnd);
 
-    const total = payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+    const patientTotal = payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
     const copays = payments?.filter(p => p.is_copay).reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
-    const otherPayments = total - copays;
+    const otherPayments = patientTotal - copays;
+    const insurancePayments = paidClaims?.reduce((sum, c) => sum + (c.paid_amount ?? c.billed_amount ?? 0), 0) || 0;
 
     // Only include years with data
-    if (total > 0 || (visitCount && visitCount > 0)) {
+    if (patientTotal > 0 || insurancePayments > 0 || (visitCount && visitCount > 0)) {
       results.push({
         year: String(year),
-        total,
+        total: patientTotal + insurancePayments,
         visitCount: visitCount || 0,
         copays,
         otherPayments,
+        insurancePayments,
       });
     }
   }

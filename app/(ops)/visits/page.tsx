@@ -10,8 +10,10 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getLocalDateString, formatDate } from '@/lib/date-utils';
-import type { PatientNonPhi, VisitNonPhi } from '@/lib/types-ops';
+import type { PatientNonPhi, VisitNonPhi, PatientBenefits, CollectionResult } from '@/lib/types-ops';
 import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
+import { ALL_PAYMENT_METHODS, usePracticeConfig } from '@/lib/practice-config';
+import { getCollectAmount } from '@/lib/benefits-calculator';
 
 interface VisitWithPatient extends VisitNonPhi {
   patient?: PatientNonPhi;
@@ -19,21 +21,23 @@ interface VisitWithPatient extends VisitNonPhi {
 
 interface PatientWithReferral extends PatientNonPhi {
   activeReferralId?: string | null;
+  benefits?: PatientBenefits | null;
 }
-
-const PAYMENT_METHODS = [
-  { value: 'CASH', label: 'Cash' },
-  { value: 'CHECK', label: 'Check' },
-  { value: 'CARD', label: 'Card' },
-  { value: 'HSA', label: 'HSA/FSA' },
-  { value: 'OTHER', label: 'Other' },
-];
 
 function VisitsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const showNewForm = searchParams.get('action') === 'new';
   const preselectedPatientId = searchParams.get('patientId');
+
+  // Get practice config for terminology
+  const { practiceType } = usePracticeConfig();
+  const isCashOnly = practiceType === 'cash_only';
+
+  // Dynamic terminology
+  const visitLabel = isCashOnly ? 'Session' : 'Visit';
+  const visitLabelPlural = isCashOnly ? 'Sessions' : 'Visits';
+  const clientLabel = isCashOnly ? 'Client' : 'Patient';
 
   const [visits, setVisits] = useState<VisitWithPatient[]>([]);
   const [patients, setPatients] = useState<PatientWithReferral[]>([]);
@@ -46,13 +50,14 @@ function VisitsContent() {
   const [visitDate, setVisitDate] = useState(getLocalDateString());
   const [isBillable, setIsBillable] = useState(true);
 
-  // Copay prompt state
-  const [showCopayDialog, setShowCopayDialog] = useState(false);
+  // Payment prompt state (copay for insurance, full payment for cash-only)
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [newVisitId, setNewVisitId] = useState<string | null>(null);
-  const [copayPatient, setCopayPatient] = useState<PatientNonPhi | null>(null);
-  const [copayAmount, setCopayAmount] = useState('');
-  const [copayMethod, setCopayMethod] = useState('CASH');
-  const [savingCopay, setSavingCopay] = useState(false);
+  const [paymentPatient, setPaymentPatient] = useState<PatientWithReferral | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('CASH');
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [collectionResult, setCollectionResult] = useState<CollectionResult | null>(null);
 
   useEffect(() => {
     loadData();
@@ -74,7 +79,7 @@ function VisitsContent() {
     const today = getLocalDateString();
 
     // Run all queries in parallel for faster loading
-    const [visitsResult, patientsResult, referralsResult] = await Promise.all([
+    const [visitsResult, patientsResult, referralsResult, benefitsResult] = await Promise.all([
       supabase
         .from('visits_non_phi')
         .select('*, patient:patients_non_phi(id, display_name)')
@@ -93,16 +98,22 @@ function VisitsContent() {
         .eq('owner_user_id', user.id)
         .or(`referral_expiration_date.is.null,referral_expiration_date.gte.${today}`)
         .order('referral_start_date', { ascending: false }),
+      supabase
+        .from('patient_benefits')
+        .select('*')
+        .eq('owner_user_id', user.id),
     ]);
 
     setVisits(visitsResult.data || []);
 
-    // Associate each patient with their active referral
+    // Associate each patient with their active referral and benefits
     const patientsWithReferrals = (patientsResult.data || []).map(patient => {
       const activeReferral = (referralsResult.data || []).find(r => r.patient_id === patient.id);
+      const patientBenefits = (benefitsResult.data || []).find(b => b.patient_id === patient.id);
       return {
         ...patient,
         activeReferralId: activeReferral?.id || null,
+        benefits: patientBenefits || null,
       };
     });
 
@@ -133,58 +144,75 @@ function VisitsContent() {
       // Close visit dialog
       setShowDialog(false);
 
-      // Set up copay prompt
+      // Set up payment prompt
       setNewVisitId(visitData.id);
-      setCopayPatient(patient || null);
-      setCopayAmount(patient?.default_copay_amount?.toString() || '');
-      setCopayMethod('CASH');
+      setPaymentPatient(patient || null);
+
+      // Calculate collection amount using benefits calculator (for insurance practices)
+      // For cash-only or patients without benefits, fall back to default amount
+      if (!isCashOnly && patient?.benefits) {
+        const collection = getCollectAmount(patient, patient.benefits);
+        setCollectionResult(collection);
+        setPaymentAmount(collection.collect_amount.toFixed(2));
+      } else {
+        setCollectionResult(null);
+        // Use default copay amount if available (can be repurposed as session rate for cash-only)
+        setPaymentAmount(patient?.default_copay_amount?.toString() || '');
+      }
+      setPaymentMethod('CASH');
 
       // Reset visit form
       setSelectedPatientId('');
       setVisitDate(getLocalDateString());
       setIsBillable(true);
 
-      // Reload data and show copay prompt
+      // Reload data and show payment prompt
       loadData();
+      router.refresh();
       router.replace('/visits');
-      setShowCopayDialog(true);
+      setShowPaymentDialog(true);
     }
     setSaving(false);
   };
 
-  const handleLogCopay = async () => {
-    if (!copayAmount || !newVisitId || !copayPatient) return;
+  const handleLogPayment = async () => {
+    if (!paymentAmount || !newVisitId || !paymentPatient) return;
 
-    setSavingCopay(true);
+    setSavingPayment(true);
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     const { error } = await supabase.from('payments_non_phi').insert({
       owner_user_id: user.id,
-      patient_id: copayPatient.id,
+      patient_id: paymentPatient.id,
       visit_id: newVisitId,
-      amount: parseFloat(copayAmount),
-      method: copayMethod,
-      is_copay: true,
+      amount: parseFloat(paymentAmount),
+      method: paymentMethod,
+      // Only mark as copay for insurance practices
+      is_copay: !isCashOnly,
     });
 
     if (!error) {
-      setShowCopayDialog(false);
+      setShowPaymentDialog(false);
       setNewVisitId(null);
-      setCopayPatient(null);
-      setCopayAmount('');
-      setCopayMethod('CASH');
+      setPaymentPatient(null);
+      setPaymentAmount('');
+      setPaymentMethod('CASH');
+      setCollectionResult(null);
+      loadData();
+      router.refresh();
     }
-    setSavingCopay(false);
+    setSavingPayment(false);
   };
 
-  const handleSkipCopay = () => {
-    setShowCopayDialog(false);
+  const handleSkipPayment = () => {
+    setShowPaymentDialog(false);
     setNewVisitId(null);
-    setCopayPatient(null);
-    setCopayAmount('');
-    setCopayMethod('CASH');
+    setPaymentPatient(null);
+    setPaymentAmount('');
+    setPaymentMethod('CASH');
+    setCollectionResult(null);
   };
 
   // Group visits by date
@@ -199,23 +227,23 @@ function VisitsContent() {
     <div className="p-4 space-y-4">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Visits</h1>
-          <p className="text-gray-500 text-sm">{visits.length} total visits</p>
+          <h1 className="text-2xl font-bold text-gray-900">{visitLabelPlural}</h1>
+          <p className="text-gray-500 text-sm">{visits.length} total {visitLabelPlural.toLowerCase()}</p>
         </div>
         <Dialog open={showDialog} onOpenChange={setShowDialog}>
           <DialogTrigger asChild>
-            <Button>Add Visit</Button>
+            <Button>Add {visitLabel}</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Log New Visit</DialogTitle>
+              <DialogTitle>Log New {visitLabel}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-4">
               <div>
-                <label className="text-sm font-medium text-gray-700">Patient *</label>
+                <label className="text-sm font-medium text-gray-700">{clientLabel} *</label>
                 <Select value={selectedPatientId} onValueChange={setSelectedPatientId}>
                   <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select patient" />
+                    <SelectValue placeholder={`Select ${clientLabel.toLowerCase()}`} />
                   </SelectTrigger>
                   <SelectContent>
                     {patients.map((patient) => (
@@ -227,7 +255,7 @@ function VisitsContent() {
                 </Select>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-700">Visit Date *</label>
+                <label className="text-sm font-medium text-gray-700">{visitLabel} Date *</label>
                 <Input
                   type="date"
                   value={visitDate}
@@ -235,57 +263,76 @@ function VisitsContent() {
                   className="mt-1"
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="billable"
-                  checked={isBillable}
-                  onChange={(e) => setIsBillable(e.target.checked)}
-                  className="rounded border-gray-300"
-                />
-                <label htmlFor="billable" className="text-sm text-gray-700">
-                  Billable to insurance
-                </label>
-              </div>
+              {/* Only show billable checkbox for insurance practices */}
+              {!isCashOnly && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="billable"
+                    checked={isBillable}
+                    onChange={(e) => setIsBillable(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  <label htmlFor="billable" className="text-sm text-gray-700">
+                    Billable to insurance
+                  </label>
+                </div>
+              )}
               <Button
                 onClick={handleAddVisit}
                 disabled={saving || !selectedPatientId || !visitDate}
                 className="w-full"
               >
-                {saving ? 'Adding...' : 'Add Visit'}
+                {saving ? 'Adding...' : `Add ${visitLabel}`}
               </Button>
             </div>
           </DialogContent>
         </Dialog>
 
-        {/* Copay Prompt Dialog */}
-        <Dialog open={showCopayDialog} onOpenChange={setShowCopayDialog}>
+        {/* Payment Prompt Dialog */}
+        <Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Visit Logged!</DialogTitle>
+              <DialogTitle>{visitLabel} Logged!</DialogTitle>
               <DialogDescription>
-                Collect copay for {copayPatient?.display_name}?
+                {isCashOnly
+                  ? `Collect payment from ${paymentPatient?.display_name}?`
+                  : `Collect from ${paymentPatient?.display_name}?`}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 pt-4">
+              {/* Show collection explanation for insurance patients with benefits */}
+              {!isCashOnly && collectionResult && (
+                <div className={`rounded-lg p-3 text-sm ${
+                  collectionResult.collect_amount === 0
+                    ? 'bg-green-50 text-green-800'
+                    : collectionResult.deductible_met
+                      ? 'bg-blue-50 text-blue-800'
+                      : 'bg-amber-50 text-amber-800'
+                }`}>
+                  <p className="font-medium">{collectionResult.explanation}</p>
+                </div>
+              )}
               <div>
-                <label className="text-sm font-medium text-gray-700">Copay Amount</label>
+                <label className="text-sm font-medium text-gray-700">
+                  {isCashOnly ? 'Payment Amount' : 'Collect Amount'}
+                </label>
                 <Input
                   type="number"
-                  value={copayAmount}
-                  onChange={(e) => setCopayAmount(e.target.value)}
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
                   placeholder="0.00"
                   className="mt-1"
                 />
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-700">Payment Method</label>
-                <Select value={copayMethod} onValueChange={setCopayMethod}>
+                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
                   <SelectTrigger className="mt-1">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {PAYMENT_METHODS.map((m) => (
+                    {ALL_PAYMENT_METHODS.map((m) => (
                       <SelectItem key={m.value} value={m.value}>
                         {m.label}
                       </SelectItem>
@@ -296,17 +343,17 @@ function VisitsContent() {
               <div className="flex gap-2">
                 <Button
                   variant="outline"
-                  onClick={handleSkipCopay}
+                  onClick={handleSkipPayment}
                   className="flex-1"
                 >
                   Skip
                 </Button>
                 <Button
-                  onClick={handleLogCopay}
-                  disabled={savingCopay || !copayAmount}
+                  onClick={handleLogPayment}
+                  disabled={savingPayment || !paymentAmount}
                   className="flex-1"
                 >
-                  {savingCopay ? 'Saving...' : 'Log Copay'}
+                  {savingPayment ? 'Saving...' : 'Log Payment'}
                 </Button>
               </div>
             </div>
@@ -314,9 +361,9 @@ function VisitsContent() {
         </Dialog>
       </header>
 
-      {/* Visit List */}
+      {/* Visit/Session List */}
       {loading ? (
-        <LoadingSpinner text="Loading visits..." />
+        <LoadingSpinner text={`Loading ${visitLabelPlural.toLowerCase()}...`} />
       ) : Object.keys(groupedVisits).length > 0 ? (
         <div className="space-y-6">
           {Object.entries(groupedVisits).map(([date, dateVisits]) => (
@@ -336,12 +383,15 @@ function VisitsContent() {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="font-medium text-gray-900">
-                            {visit.patient?.display_name || 'Unknown Patient'}
+                            {visit.patient?.display_name || `Unknown ${clientLabel}`}
                           </p>
                         </div>
-                        <Badge variant="outline">
-                          {visit.is_billable_to_insurance ? 'Insurance' : 'Self-pay'}
-                        </Badge>
+                        {/* Only show insurance badge for insurance practices */}
+                        {!isCashOnly && (
+                          <Badge variant="outline">
+                            {visit.is_billable_to_insurance ? 'Insurance' : 'Self-pay'}
+                          </Badge>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
@@ -354,8 +404,8 @@ function VisitsContent() {
         <Card>
           <CardContent className="py-12 text-center">
             <CalendarIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500 mb-4">No visits recorded yet</p>
-            <Button onClick={() => setShowDialog(true)}>Log Your First Visit</Button>
+            <p className="text-gray-500 mb-4">No {visitLabelPlural.toLowerCase()} recorded yet</p>
+            <Button onClick={() => setShowDialog(true)}>Log Your First {visitLabel}</Button>
           </CardContent>
         </Card>
       )}

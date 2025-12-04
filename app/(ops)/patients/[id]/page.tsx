@@ -11,16 +11,16 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getLocalDateString, formatDate } from '@/lib/date-utils';
-import type { PatientNonPhi, VisitNonPhi, ClaimNonPhi, ReferralNonPhi, PaymentNonPhi } from '@/lib/types-ops';
+import { getLocalDateString, formatDate, formatTimestamp } from '@/lib/date-utils';
+import type { PatientNonPhi, VisitNonPhi, ClaimNonPhi, ReferralNonPhi, PaymentNonPhi, DocumentTemplate, ClientDocument, PatientBenefits } from '@/lib/types-ops';
+import type { IntakeForm, IntakeLink, IntakeResponse } from '@/lib/types-intake';
+import { ALL_PAYMENT_METHODS, usePracticeConfig } from '@/lib/practice-config';
+import { QuestionRenderer } from '@/components/intake/QuestionRenderer';
+import { BenefitsSection } from '@/components/ops/BenefitsSection';
 
-const PAYMENT_METHODS = [
-  { value: 'CASH', label: 'Cash' },
-  { value: 'CHECK', label: 'Check' },
-  { value: 'CARD', label: 'Card' },
-  { value: 'HSA', label: 'HSA/FSA' },
-  { value: 'OTHER', label: 'Other' },
-];
+interface DocumentWithStatus extends DocumentTemplate {
+  clientDoc?: ClientDocument | null;
+}
 
 const VISIT_LIMIT_TYPES = [
   { value: 'PER_REFERRAL', label: 'Per Referral' },
@@ -32,12 +32,51 @@ export default function PatientDetailPage() {
   const params = useParams();
   const id = params.id as string;
   const router = useRouter();
+
+  // Get practice config for terminology
+  const { practiceType } = usePracticeConfig();
+  const isCashOnly = practiceType === 'cash_only';
+
+  // Dynamic terminology
+  const clientLabel = isCashOnly ? 'Client' : 'Patient';
+  const clientLabelPlural = isCashOnly ? 'Clients' : 'Patients';
+  const visitLabel = isCashOnly ? 'Session' : 'Visit';
+  const visitLabelPlural = isCashOnly ? 'Sessions' : 'Visits';
+
   const [patient, setPatient] = useState<PatientNonPhi | null>(null);
   const [visits, setVisits] = useState<VisitNonPhi[]>([]);
   const [claims, setClaims] = useState<ClaimNonPhi[]>([]);
   const [referrals, setReferrals] = useState<ReferralNonPhi[]>([]);
   const [payments, setPayments] = useState<PaymentNonPhi[]>([]);
+  const [documents, setDocuments] = useState<DocumentWithStatus[]>([]);
+  const [benefits, setBenefits] = useState<PatientBenefits | null>(null);
   const [loading, setLoading] = useState(true);
+  const [signingDoc, setSigningDoc] = useState<DocumentWithStatus | null>(null);
+  const [savingSignature, setSavingSignature] = useState(false);
+
+  // Intake form state
+  const [intakeForms, setIntakeForms] = useState<IntakeForm[]>([]);
+  const [intakeLinks, setIntakeLinks] = useState<(IntakeLink & { intake_forms?: IntakeForm })[]>([]);
+  const [intakeResponses, setIntakeResponses] = useState<(IntakeResponse & { intake_forms?: IntakeForm })[]>([]);
+  const [showSendIntakeDialog, setShowSendIntakeDialog] = useState(false);
+  const [selectedIntakeFormId, setSelectedIntakeFormId] = useState('');
+  const [sendingIntake, setSendingIntake] = useState(false);
+  const [viewingResponse, setViewingResponse] = useState<(IntakeResponse & { intake_forms?: IntakeForm }) | null>(null);
+
+  // Consent link state
+  interface ConsentLink {
+    id: string;
+    token: string;
+    template_id: string;
+    patient_id: string;
+    owner_user_id: string;
+    expires_at: string | null;
+    signed_at: string | null;
+    created_at: string;
+  }
+  const [consentLinks, setConsentLinks] = useState<ConsentLink[]>([]);
+  const [sendingConsentDoc, setSendingConsentDoc] = useState<DocumentWithStatus | null>(null);
+  const [sendingConsentLink, setSendingConsentLink] = useState(false);
 
   // Payment form state
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -63,7 +102,7 @@ export default function PatientDetailPage() {
     if (!user) return;
 
     // Run all queries in parallel for faster loading
-    const [patientResult, visitsResult, claimsResult, referralsResult, paymentsResult] = await Promise.all([
+    const [patientResult, visitsResult, claimsResult, referralsResult, paymentsResult, templatesResult, clientDocsResult, intakeFormsResult, intakeLinksResult, intakeResponsesResult, benefitsResult, consentLinksResult] = await Promise.all([
       supabase
         .from('patients_non_phi')
         .select('*')
@@ -90,6 +129,52 @@ export default function PatientDetailPage() {
         .select('*')
         .eq('patient_id', id)
         .order('created_at', { ascending: false }),
+      supabase
+        .from('document_templates')
+        .select('*')
+        .eq('owner_user_id', user.id)
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true }),
+      supabase
+        .from('client_documents')
+        .select('*')
+        .eq('patient_id', id)
+        .eq('owner_user_id', user.id),
+      // Intake forms
+      supabase
+        .from('intake_forms')
+        .select('*')
+        .eq('owner_user_id', user.id)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false }),
+      // Intake links for this patient
+      supabase
+        .from('intake_links')
+        .select('*, intake_forms (*)')
+        .eq('patient_id', id)
+        .eq('owner_user_id', user.id)
+        .order('created_at', { ascending: false }),
+      // Intake responses for this patient
+      supabase
+        .from('intake_responses')
+        .select('*, intake_forms (*)')
+        .eq('patient_id', id)
+        .eq('owner_user_id', user.id)
+        .order('submitted_at', { ascending: false }),
+      // Patient benefits
+      supabase
+        .from('patient_benefits')
+        .select('*')
+        .eq('patient_id', id)
+        .eq('owner_user_id', user.id)
+        .single(),
+      // Consent links for this patient
+      supabase
+        .from('consent_links')
+        .select('*')
+        .eq('patient_id', id)
+        .eq('owner_user_id', user.id)
+        .order('created_at', { ascending: false }),
     ]);
 
     if (patientResult.data) {
@@ -99,6 +184,27 @@ export default function PatientDetailPage() {
     setClaims(claimsResult.data || []);
     setReferrals(referralsResult.data || []);
     setPayments(paymentsResult.data || []);
+
+    // Merge templates with client documents
+    const templates = templatesResult.data || [];
+    const clientDocs = clientDocsResult.data || [];
+    const docsWithStatus: DocumentWithStatus[] = templates.map(template => ({
+      ...template,
+      clientDoc: clientDocs.find(cd => cd.template_id === template.id) || null,
+    }));
+    setDocuments(docsWithStatus);
+
+    // Set intake data
+    setIntakeForms(intakeFormsResult.data || []);
+    setIntakeLinks(intakeLinksResult.data || []);
+    setIntakeResponses(intakeResponsesResult.data || []);
+
+    // Set benefits (may be null if not configured)
+    setBenefits(benefitsResult.data || null);
+
+    // Set consent links
+    setConsentLinks(consentLinksResult.data || []);
+
     setLoading(false);
   }, [id]);
 
@@ -138,13 +244,15 @@ export default function PatientDetailPage() {
       patient_id: id,
       amount: parseFloat(paymentAmount),
       method: paymentMethod,
-      is_copay: paymentIsCopay,
+      // For cash-only practices, payments are never copays
+      is_copay: !isCashOnly && paymentIsCopay,
     });
 
     if (!error) {
       setShowPaymentDialog(false);
       resetPaymentForm();
       loadData();
+      router.refresh();
     }
     setSavingPayment(false);
   };
@@ -211,6 +319,7 @@ export default function PatientDetailPage() {
       setShowReferralDialog(false);
       resetReferralForm();
       loadData();
+      router.refresh();
     }
 
     setSavingReferral(false);
@@ -220,11 +329,157 @@ export default function PatientDetailPage() {
     return visits.filter(v => v.referral_id === referralId).length;
   };
 
+  const handleSignDocument = async (doc: DocumentWithStatus) => {
+    setSavingSignature(true);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setSavingSignature(false);
+      return;
+    }
+
+    if (doc.clientDoc) {
+      // Update existing
+      const { error } = await supabase
+        .from('client_documents')
+        .update({
+          status: 'SIGNED',
+          signed_at: new Date().toISOString(),
+          signature_data: 'Acknowledged',
+        })
+        .eq('id', doc.clientDoc.id);
+
+      if (error) console.error('Error updating document:', error);
+    } else {
+      // Create new
+      const { error } = await supabase.from('client_documents').insert({
+        owner_user_id: user.id,
+        patient_id: id,
+        template_id: doc.id,
+        status: 'SIGNED',
+        signed_at: new Date().toISOString(),
+        signature_data: 'Acknowledged',
+      });
+
+      if (error) console.error('Error signing document:', error);
+    }
+
+    setSigningDoc(null);
+    loadData();
+    router.refresh();
+    setSavingSignature(false);
+  };
+
+  const getDocumentStats = () => {
+    const total = documents.length;
+    const signed = documents.filter(d => d.clientDoc?.status === 'SIGNED').length;
+    const required = documents.filter(d => d.is_required).length;
+    const requiredSigned = documents.filter(d => d.is_required && d.clientDoc?.status === 'SIGNED').length;
+    return { total, signed, required, requiredSigned };
+  };
+
+  const handleSendIntakeForm = async () => {
+    if (!selectedIntakeFormId) return;
+
+    setSendingIntake(true);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setSendingIntake(false);
+      return;
+    }
+
+    // Generate a random token
+    const token = crypto.randomUUID().replace(/-/g, '');
+
+    // Create expiration date (7 days from now)
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    const { error } = await supabase.from('intake_links').insert({
+      token,
+      form_id: selectedIntakeFormId,
+      patient_id: id,
+      owner_user_id: user.id,
+      expires_at: expiresAt.toISOString(),
+    });
+
+    if (error) {
+      console.error('Error creating intake link:', error);
+      alert('Failed to create intake link');
+    } else {
+      setShowSendIntakeDialog(false);
+      setSelectedIntakeFormId('');
+      loadData();
+      router.refresh();
+    }
+    setSendingIntake(false);
+  };
+
+  const copyIntakeLink = (token: string) => {
+    const url = `${window.location.origin}/intake/${token}`;
+    navigator.clipboard.writeText(url);
+    alert('Link copied to clipboard!');
+  };
+
+  const handleSendConsentForm = async (doc: DocumentWithStatus) => {
+    setSendingConsentLink(true);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setSendingConsentLink(false);
+      return;
+    }
+
+    // Generate a short random token (8 chars)
+    const chars = 'abcdefghijkmnopqrstuvwxyz23456789';
+    let token = '';
+    for (let i = 0; i < 8; i++) {
+      token += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+
+    // Create expiration date (7 days from now)
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    const { error } = await supabase.from('consent_links').insert({
+      token,
+      template_id: doc.id,
+      patient_id: id,
+      owner_user_id: user.id,
+      expires_at: expiresAt.toISOString(),
+    });
+
+    if (error) {
+      console.error('Error creating consent link:', error);
+      alert('Failed to create consent link');
+    } else {
+      setSendingConsentDoc(null);
+      loadData();
+      router.refresh();
+    }
+    setSendingConsentLink(false);
+  };
+
+  const copyConsentLink = (token: string) => {
+    const url = `${window.location.origin}/consent/${token}`;
+    navigator.clipboard.writeText(url);
+    alert('Consent link copied to clipboard!');
+  };
+
+  const getConsentLinkForDoc = (templateId: string) => {
+    return consentLinks.find(link =>
+      link.template_id === templateId &&
+      !link.signed_at &&
+      (!link.expires_at || new Date(link.expires_at) > new Date())
+    );
+  };
+
   if (loading) {
     return (
       <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4">
         <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-        <p className="text-gray-500 animate-pulse">Loading patient...</p>
+        <p className="text-gray-500 animate-pulse">Loading {clientLabel.toLowerCase()}...</p>
       </div>
     );
   }
@@ -232,9 +487,9 @@ export default function PatientDetailPage() {
   if (!patient) {
     return (
       <div className="p-4 text-center">
-        <p className="text-gray-500">Patient not found</p>
+        <p className="text-gray-500">{clientLabel} not found</p>
         <Link href="/patients" className="text-blue-600 font-medium mt-2 inline-block">
-          Back to Patients
+          Back to {clientLabelPlural}
         </Link>
       </div>
     );
@@ -249,25 +504,26 @@ export default function PatientDetailPage() {
       <header>
         <Link href="/patients" className="text-blue-600 text-sm font-medium flex items-center gap-1 mb-2">
           <ChevronLeftIcon className="w-4 h-4" />
-          Back to Patients
+          Back to {clientLabelPlural}
         </Link>
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">{patient.display_name}</h1>
-            {patient.insurer_name && (
+            {/* Only show insurer for insurance practices */}
+            {!isCashOnly && patient.insurer_name && (
               <p className="text-gray-500">{patient.insurer_name}</p>
             )}
           </div>
           {patient.default_copay_amount && (
             <Badge variant="outline" className="text-sm">
-              Copay: ${patient.default_copay_amount}
+              {isCashOnly ? 'Rate' : 'Collect'}: ${patient.default_copay_amount}
             </Badge>
           )}
         </div>
       </header>
 
-      {/* Active Referral Alert */}
-      {activeReferral && (
+      {/* Active Referral Alert - only show for insurance practices */}
+      {!isCashOnly && activeReferral && (
         <Card className="border-blue-200 bg-blue-50">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
@@ -310,42 +566,63 @@ export default function PatientDetailPage() {
       )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className={`grid gap-3 ${isCashOnly ? 'grid-cols-2' : 'grid-cols-3'}`}>
         <Card>
           <CardContent className="p-3 text-center">
             <div className="text-2xl font-bold">{visits.length}</div>
-            <p className="text-xs text-gray-500">Visits</p>
+            <p className="text-xs text-gray-500">{visitLabelPlural}</p>
           </CardContent>
         </Card>
+        {/* Only show claims for insurance practices */}
+        {!isCashOnly && (
+          <Card>
+            <CardContent className="p-3 text-center">
+              <div className="text-2xl font-bold">
+                {claims.filter(c => ['TO_SUBMIT', 'SUBMITTED', 'PENDING'].includes(c.status)).length}
+              </div>
+              <p className="text-xs text-gray-500">Pending Claims</p>
+            </CardContent>
+          </Card>
+        )}
+        {/* Show payments total for cash-only, referrals for insurance */}
         <Card>
           <CardContent className="p-3 text-center">
             <div className="text-2xl font-bold">
-              {claims.filter(c => ['TO_SUBMIT', 'SUBMITTED', 'PENDING'].includes(c.status)).length}
+              {isCashOnly
+                ? `$${payments.reduce((sum, p) => sum + (p.amount || 0), 0).toLocaleString()}`
+                : referrals.length}
             </div>
-            <p className="text-xs text-gray-500">Pending Claims</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 text-center">
-            <div className="text-2xl font-bold">{referrals.length}</div>
-            <p className="text-xs text-gray-500">Referrals</p>
+            <p className="text-xs text-gray-500">{isCashOnly ? 'Total Paid' : 'Referrals'}</p>
           </CardContent>
         </Card>
       </div>
 
       {/* Tabs */}
       <Tabs defaultValue="visits" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="visits">Visits</TabsTrigger>
-          <TabsTrigger value="claims">Claims</TabsTrigger>
-          <TabsTrigger value="referrals">Referrals</TabsTrigger>
+        <TabsList className={`grid w-full ${isCashOnly ? 'grid-cols-4' : 'grid-cols-7'}`}>
+          <TabsTrigger value="visits">{visitLabelPlural}</TabsTrigger>
+          {!isCashOnly && <TabsTrigger value="benefits">Benefits</TabsTrigger>}
+          {!isCashOnly && <TabsTrigger value="claims">Claims</TabsTrigger>}
+          {!isCashOnly && <TabsTrigger value="referrals">Referrals</TabsTrigger>}
           <TabsTrigger value="payments">Payments</TabsTrigger>
+          <TabsTrigger value="intake" className="relative">
+            Intake
+            {intakeResponses.length > 0 && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full" />
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="documents" className="relative">
+            Docs
+            {documents.length > 0 && getDocumentStats().signed < documents.length && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full" />
+            )}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="visits" className="space-y-3 mt-4">
           <div className="flex justify-end">
             <Button size="sm" onClick={() => router.push(`/visits?patientId=${id}&action=new`)}>
-              Add Visit
+              Add {visitLabel}
             </Button>
           </div>
           {visits.length > 0 ? (
@@ -362,11 +639,15 @@ export default function PatientDetailPage() {
                           year: 'numeric',
                         })}
                       </p>
-                      <p className="text-sm text-gray-500">
-                        {visit.is_billable_to_insurance ? 'Insurance' : 'Self-pay'}
-                      </p>
+                      {/* Only show insurance/self-pay indicator for insurance practices */}
+                      {!isCashOnly && (
+                        <p className="text-sm text-gray-500">
+                          {visit.is_billable_to_insurance ? 'Insurance' : 'Self-pay'}
+                        </p>
+                      )}
                     </div>
-                    {visit.referral_id && (
+                    {/* Only show referral badge for insurance practices */}
+                    {!isCashOnly && visit.referral_id && (
                       <Badge variant="outline" className="text-xs">
                         Referral
                       </Badge>
@@ -378,11 +659,22 @@ export default function PatientDetailPage() {
           ) : (
             <Card>
               <CardContent className="py-8 text-center text-gray-500">
-                No visits recorded yet
+                No {visitLabelPlural.toLowerCase()} recorded yet
               </CardContent>
             </Card>
           )}
         </TabsContent>
+
+        {/* Benefits Tab - Insurance practices only */}
+        {!isCashOnly && patient && (
+          <TabsContent value="benefits" className="mt-4">
+            <BenefitsSection
+              patient={patient}
+              benefits={benefits}
+              onBenefitsUpdate={loadData}
+            />
+          </TabsContent>
+        )}
 
         <TabsContent value="claims" className="space-y-3 mt-4">
           <div className="flex justify-end">
@@ -626,7 +918,7 @@ export default function PatientDetailPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {PAYMENT_METHODS.map((m) => (
+                        {ALL_PAYMENT_METHODS.map((m) => (
                           <SelectItem key={m.value} value={m.value}>
                             {m.label}
                           </SelectItem>
@@ -634,18 +926,21 @@ export default function PatientDetailPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="is-copay"
-                      checked={paymentIsCopay}
-                      onChange={(e) => setPaymentIsCopay(e.target.checked)}
-                      className="rounded border-gray-300"
-                    />
-                    <label htmlFor="is-copay" className="text-sm text-gray-700">
-                      This is a copay
-                    </label>
-                  </div>
+                  {/* Only show collection checkbox for insurance practices */}
+                  {!isCashOnly && (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="is-copay"
+                        checked={paymentIsCopay}
+                        onChange={(e) => setPaymentIsCopay(e.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      <label htmlFor="is-copay" className="text-sm text-gray-700">
+                        Patient collection
+                      </label>
+                    </div>
+                  )}
                   <Button
                     onClick={handleSavePayment}
                     disabled={savingPayment || !paymentAmount}
@@ -676,11 +971,12 @@ export default function PatientDetailPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="text-xs">
-                        {PAYMENT_METHODS.find(m => m.value === payment.method)?.label || payment.method}
+                        {ALL_PAYMENT_METHODS.find(m => m.value === payment.method)?.label || payment.method}
                       </Badge>
-                      {payment.is_copay && (
+                      {/* Only show collection badge for insurance practices */}
+                      {!isCashOnly && payment.is_copay && (
                         <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700">
-                          Copay
+                          Collect
                         </Badge>
                       )}
                     </div>
@@ -697,8 +993,342 @@ export default function PatientDetailPage() {
             </Card>
           )}
         </TabsContent>
+
+        <TabsContent value="intake" className="space-y-3 mt-4">
+          <div className="flex justify-end">
+            <Dialog open={showSendIntakeDialog} onOpenChange={setShowSendIntakeDialog}>
+              <DialogTrigger asChild>
+                <Button size="sm">Send Intake Form</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Send Intake Form</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 pt-4">
+                  {intakeForms.length > 0 ? (
+                    <>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Select Form</label>
+                        <Select value={selectedIntakeFormId} onValueChange={setSelectedIntakeFormId}>
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Choose a form..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {intakeForms.map((form) => (
+                              <SelectItem key={form.id} value={form.id}>
+                                {form.title} {form.is_default && '(Default)'}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <p className="text-sm text-gray-500">
+                        This will generate a unique link for {patient.display_name} to fill out the form. The link expires in 7 days.
+                      </p>
+                      <Button
+                        onClick={handleSendIntakeForm}
+                        disabled={sendingIntake || !selectedIntakeFormId}
+                        className="w-full"
+                      >
+                        {sendingIntake ? 'Creating...' : 'Create Intake Link'}
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="text-center py-4">
+                      <p className="text-gray-500 mb-4">No intake forms created yet.</p>
+                      <Link href="/intake-forms">
+                        <Button variant="outline">Create Intake Form</Button>
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          {/* Pending Intake Links */}
+          {intakeLinks.filter(link => !link.completed_at).length > 0 && (
+            <Card className="bg-yellow-50 border-yellow-200">
+              <CardContent className="p-4">
+                <h4 className="font-medium text-yellow-800 mb-3">Pending Intake Forms</h4>
+                <div className="space-y-3">
+                  {intakeLinks.filter(link => !link.completed_at).map((link) => {
+                    const isExpired = link.expires_at && new Date(link.expires_at) < new Date();
+                    return (
+                      <div key={link.id} className="flex items-center justify-between bg-white rounded-lg p-3 border">
+                        <div>
+                          <p className="font-medium text-gray-900">{link.intake_forms?.title || 'Intake Form'}</p>
+                          <p className="text-xs text-gray-500">
+                            Created {formatDate(link.created_at)}
+                            {link.expires_at && (
+                              <> · {isExpired ? 'Expired' : `Expires ${formatDate(link.expires_at)}`}</>
+                            )}
+                          </p>
+                        </div>
+                        {!isExpired && (
+                          <Button size="sm" variant="outline" onClick={() => copyIntakeLink(link.token)}>
+                            <CopyIcon className="w-4 h-4 mr-1" />
+                            Copy Link
+                          </Button>
+                        )}
+                        {isExpired && (
+                          <Badge variant="outline" className="bg-red-100 text-red-700">Expired</Badge>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Completed Intake Responses */}
+          {intakeResponses.length > 0 ? (
+            <>
+              <h4 className="font-medium text-gray-700">Completed Forms</h4>
+              {intakeResponses.map((response) => (
+                <Card key={response.id} className="border-green-200">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="font-medium text-gray-900">{response.intake_forms?.title || 'Intake Form'}</p>
+                        <p className="text-sm text-gray-500">
+                          Submitted {formatTimestamp(response.submitted_at)}
+                        </p>
+                      </div>
+                      <Dialog open={viewingResponse?.id === response.id} onOpenChange={(open) => !open && setViewingResponse(null)}>
+                        <DialogTrigger asChild>
+                          <Button size="sm" variant="outline" onClick={() => setViewingResponse(response)}>
+                            View Responses
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                          <DialogHeader>
+                            <DialogTitle>{response.intake_forms?.title || 'Intake Responses'}</DialogTitle>
+                          </DialogHeader>
+                          <div className="py-4">
+                            <p className="text-sm text-gray-500 mb-4">
+                              Submitted on {new Date(response.submitted_at).toLocaleString()}
+                            </p>
+                            {response.intake_forms?.questions && (
+                              <QuestionRenderer
+                                questions={response.intake_forms.questions}
+                                responses={response.responses}
+                                onChange={() => {}}
+                                errors={{}}
+                              />
+                            )}
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </>
+          ) : intakeLinks.filter(link => !link.completed_at).length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center text-gray-500">
+                <IntakeIcon className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                <p className="mb-2">No intake forms sent yet</p>
+                <p className="text-sm mb-4">Send an intake form for {patient.display_name} to complete remotely</p>
+                <Button onClick={() => setShowSendIntakeDialog(true)}>Send Intake Form</Button>
+              </CardContent>
+            </Card>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="documents" className="space-y-3 mt-4">
+          {documents.length > 0 ? (
+            <>
+              {/* Documents Summary */}
+              <Card className="bg-gradient-to-br from-primary/5 to-primary/10">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Document Status</p>
+                      <p className="text-2xl font-bold">
+                        {getDocumentStats().signed}/{documents.length}
+                      </p>
+                    </div>
+                    {getDocumentStats().required > 0 && (
+                      <div className="text-right">
+                        <p className="text-xs text-gray-500">Required</p>
+                        <p className={`font-semibold ${getDocumentStats().requiredSigned === getDocumentStats().required ? 'text-green-600' : 'text-orange-600'}`}>
+                          {getDocumentStats().requiredSigned}/{getDocumentStats().required}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Document List */}
+              {documents.map((doc) => {
+                const isSigned = doc.clientDoc?.status === 'SIGNED';
+                const pendingLink = getConsentLinkForDoc(doc.id);
+                return (
+                  <Card key={doc.id} className={isSigned ? 'border-green-200' : pendingLink ? 'border-yellow-200' : ''}>
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-medium text-gray-900">{doc.title}</h4>
+                            {doc.is_required && (
+                              <Badge variant="outline" className="text-xs">Required</Badge>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-500 mt-1">
+                            {doc.document_type.charAt(0) + doc.document_type.slice(1).toLowerCase()}
+                          </p>
+                          {isSigned && doc.clientDoc?.signed_at && (
+                            <p className="text-xs text-green-600 mt-1">
+                              Signed {formatDate(doc.clientDoc.signed_at.split('T')[0])}
+                            </p>
+                          )}
+                          {pendingLink && !isSigned && (
+                            <p className="text-xs text-yellow-600 mt-1">
+                              Link sent {formatDate(pendingLink.created_at.split('T')[0])}
+                              {pendingLink.expires_at && ` · Expires ${formatDate(pendingLink.expires_at.split('T')[0])}`}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          {isSigned ? (
+                            <Badge className="bg-green-100 text-green-800">
+                              <CheckIcon className="w-3 h-3 mr-1" />
+                              Signed
+                            </Badge>
+                          ) : pendingLink ? (
+                            <>
+                              <Badge className="bg-yellow-100 text-yellow-800">
+                                <SendIcon className="w-3 h-3 mr-1" />
+                                Link Sent
+                              </Badge>
+                              <Button size="sm" variant="outline" onClick={() => copyConsentLink(pendingLink.token)}>
+                                <CopyIcon className="w-3 h-3 mr-1" />
+                                Copy
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              {/* Send to Sign Dialog */}
+                              <Dialog open={sendingConsentDoc?.id === doc.id} onOpenChange={(open) => !open && setSendingConsentDoc(null)}>
+                                <DialogTrigger asChild>
+                                  <Button size="sm" onClick={() => setSendingConsentDoc(doc)}>
+                                    <SendIcon className="w-3 h-3 mr-1" />
+                                    Send to Sign
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent>
+                                  <DialogHeader>
+                                    <DialogTitle>Send Consent Form</DialogTitle>
+                                  </DialogHeader>
+                                  <div className="py-4 space-y-4">
+                                    <p className="text-gray-600">
+                                      Generate a unique link for <strong>{patient.display_name}</strong> to sign &quot;{doc.title}&quot; remotely.
+                                    </p>
+                                    <p className="text-sm text-gray-500">
+                                      The link will expire in 7 days. You can copy and share it via text, email, or any messaging app.
+                                    </p>
+                                    <div className="flex gap-2">
+                                      <Button
+                                        variant="outline"
+                                        onClick={() => setSendingConsentDoc(null)}
+                                        className="flex-1"
+                                      >
+                                        Cancel
+                                      </Button>
+                                      <Button
+                                        onClick={() => handleSendConsentForm(doc)}
+                                        disabled={sendingConsentLink}
+                                        className="flex-1"
+                                      >
+                                        {sendingConsentLink ? 'Creating...' : 'Create Link'}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                              {/* In-Office Sign Dialog */}
+                              <Dialog open={signingDoc?.id === doc.id} onOpenChange={(open) => !open && setSigningDoc(null)}>
+                                <DialogTrigger asChild>
+                                  <Button size="sm" variant="outline" onClick={() => setSigningDoc(doc)}>
+                                    Sign in Office
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+                                  <DialogHeader>
+                                    <DialogTitle>{doc.title}</DialogTitle>
+                                  </DialogHeader>
+                                  <div className="py-4">
+                                    <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap">
+                                      {doc.content}
+                                    </div>
+                                  </div>
+                                  <div className="border-t pt-4 space-y-3">
+                                    <p className="text-sm text-gray-600">
+                                      By clicking &quot;Sign Document&quot;, {patient.display_name} acknowledges they have read and understood this document.
+                                    </p>
+                                    <div className="flex gap-2">
+                                      <Button
+                                        variant="outline"
+                                        onClick={() => setSigningDoc(null)}
+                                        className="flex-1"
+                                      >
+                                        Cancel
+                                      </Button>
+                                      <Button
+                                        onClick={() => handleSignDocument(doc)}
+                                        disabled={savingSignature}
+                                        className="flex-1"
+                                      >
+                                        {savingSignature ? 'Signing...' : 'Sign Document'}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </>
+          ) : (
+            <Card>
+              <CardContent className="py-8 text-center text-gray-500">
+                <DocumentIcon className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                <p className="mb-2">No document templates created yet</p>
+                <p className="text-sm mb-4">Create intake forms and consent documents in Settings</p>
+                <Link href="/documents">
+                  <Button variant="outline">Manage Documents</Button>
+                </Link>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
+function DocumentIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+    </svg>
   );
 }
 
@@ -732,6 +1362,30 @@ function ChevronLeftIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+    </svg>
+  );
+}
+
+function CopyIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+    </svg>
+  );
+}
+
+function IntakeIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
+    </svg>
+  );
+}
+
+function SendIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
     </svg>
   );
 }

@@ -11,11 +11,18 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import type { PatientWithStats } from '@/lib/types-ops';
 import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
+import { usePracticeConfig } from '@/lib/practice-config';
 
 function PatientsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const showNewForm = searchParams.get('action') === 'new';
+
+  // Get practice config for terminology
+  const { practiceType } = usePracticeConfig();
+  const isCashOnly = practiceType === 'cash_only';
+  const clientLabel = isCashOnly ? 'Client' : 'Patient';
+  const clientLabelPlural = isCashOnly ? 'Clients' : 'Patients';
 
   const [patients, setPatients] = useState<PatientWithStats[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,6 +91,7 @@ function PatientsContent() {
       setInsurerName('');
       setCopayAmount('');
       loadPatients();
+      router.refresh();
       router.replace('/patients');
     }
     setSaving(false);
@@ -98,16 +106,16 @@ function PatientsContent() {
     <div className="p-4 space-y-4">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Patients</h1>
-          <p className="text-gray-500 text-sm">{patients.length} active patients</p>
+          <h1 className="text-2xl font-bold text-gray-900">{clientLabelPlural}</h1>
+          <p className="text-gray-500 text-sm">{patients.length} active {clientLabelPlural.toLowerCase()}</p>
         </div>
         <Dialog open={showDialog} onOpenChange={setShowDialog}>
           <DialogTrigger asChild>
-            <Button>Add Patient</Button>
+            <Button>Add {clientLabel}</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add New Patient</DialogTitle>
+              <DialogTitle>Add New {clientLabel}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-4">
               <div>
@@ -120,17 +128,22 @@ function PatientsContent() {
                 />
                 <p className="text-xs text-gray-500 mt-1">Use an alias - no real names for privacy</p>
               </div>
+              {/* Only show insurance field for insurance practices */}
+              {!isCashOnly && (
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Insurance</label>
+                  <Input
+                    value={insurerName}
+                    onChange={(e) => setInsurerName(e.target.value)}
+                    placeholder="e.g., Blue Cross, Aetna, Self-Pay"
+                    className="mt-1"
+                  />
+                </div>
+              )}
               <div>
-                <label className="text-sm font-medium text-gray-700">Insurance</label>
-                <Input
-                  value={insurerName}
-                  onChange={(e) => setInsurerName(e.target.value)}
-                  placeholder="e.g., Blue Cross, Aetna, Self-Pay"
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700">Default Copay</label>
+                <label className="text-sm font-medium text-gray-700">
+                  {isCashOnly ? 'Default Session Rate' : 'Default Collect'}
+                </label>
                 <Input
                   type="number"
                   value={copayAmount}
@@ -144,7 +157,7 @@ function PatientsContent() {
                 disabled={saving || !displayName.trim()}
                 className="w-full"
               >
-                {saving ? 'Adding...' : 'Add Patient'}
+                {saving ? 'Adding...' : `Add ${clientLabel}`}
               </Button>
             </div>
           </DialogContent>
@@ -158,15 +171,15 @@ function PatientsContent() {
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search patients..."
+            placeholder={`Search ${clientLabelPlural.toLowerCase()}...`}
             className="pl-9"
           />
         </div>
       )}
 
-      {/* Patient List */}
+      {/* Client/Patient List */}
       {loading ? (
-        <LoadingSpinner text="Loading patients..." />
+        <LoadingSpinner text={`Loading ${clientLabelPlural.toLowerCase()}...`} />
       ) : filteredPatients.length > 0 ? (
         <div className="space-y-3">
           {filteredPatients.map((patient) => (
@@ -198,14 +211,14 @@ function PatientsContent() {
         <Card>
           <CardContent className="py-12 text-center">
             <UsersIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500 mb-4">No patients yet</p>
-            <Button onClick={() => setShowDialog(true)}>Add Your First Patient</Button>
+            <p className="text-gray-500 mb-4">No {clientLabelPlural.toLowerCase()} yet</p>
+            <Button onClick={() => setShowDialog(true)}>Add Your First {clientLabel}</Button>
           </CardContent>
         </Card>
       ) : (
         <Card>
           <CardContent className="py-8 text-center">
-            <p className="text-gray-500">No patients match &quot;{searchQuery}&quot;</p>
+            <p className="text-gray-500">No {clientLabelPlural.toLowerCase()} match &quot;{searchQuery}&quot;</p>
           </CardContent>
         </Card>
       )}
@@ -239,7 +252,7 @@ function UsersIcon({ className }: { className?: string }) {
 
 export default function PatientsPage() {
   return (
-    <Suspense fallback={<PageLoading text="Loading patients..." />}>
+    <Suspense fallback={<PageLoading text="Loading..." />}>
       <PatientsContent />
     </Suspense>
   );

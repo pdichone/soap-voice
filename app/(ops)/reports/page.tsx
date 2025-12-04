@@ -20,10 +20,16 @@ import type {
   PaymentMethodBreakdown,
   PaymentExport,
 } from '@/lib/types-ops';
+import { usePracticeConfig } from '@/lib/practice-config';
 
 type ViewPeriod = 'weekly' | 'monthly' | 'yearly';
 
 export default function ReportsPage() {
+  // Get practice config for terminology
+  const { features, practiceType } = usePracticeConfig();
+  const isCashOnly = practiceType === 'cash_only';
+  const visitLabel = features.visitLabelPlural.toLowerCase();
+
   const [loading, setLoading] = useState(true);
   const [viewPeriod, setViewPeriod] = useState<ViewPeriod>('monthly');
   const [summary, setSummary] = useState<EarningsSummary | null>(null);
@@ -187,6 +193,11 @@ export default function ReportsPage() {
                 {weekTrend.isUp ? '↑' : '↓'} {weekTrend.value}% vs last week
               </p>
             )}
+            {!isCashOnly && summary?.insuranceThisWeek && summary.insuranceThisWeek > 0 && (
+              <p className="text-xs text-blue-600 mt-1">
+                {formatCurrency(summary.insuranceThisWeek)} insurance
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -199,6 +210,11 @@ export default function ReportsPage() {
             {monthTrend && monthTrend.value > 0 && (
               <p className={`text-xs mt-1 ${monthTrend.isUp ? 'text-green-600' : 'text-red-600'}`}>
                 {monthTrend.isUp ? '↑' : '↓'} {monthTrend.value}% vs last month
+              </p>
+            )}
+            {!isCashOnly && summary?.insuranceThisMonth && summary.insuranceThisMonth > 0 && (
+              <p className="text-xs text-blue-600 mt-1">
+                {formatCurrency(summary.insuranceThisMonth)} insurance
               </p>
             )}
           </CardContent>
@@ -217,6 +233,11 @@ export default function ReportsPage() {
               {yearTrend && yearTrend.value > 0 && summary?.lastYear && summary.lastYear > 0 && (
                 <p className={`text-xs mt-1 ${yearTrend.isUp ? 'text-green-600' : 'text-red-600'}`}>
                   {yearTrend.isUp ? '↑' : '↓'} {yearTrend.value}% vs same period last year
+                </p>
+              )}
+              {!isCashOnly && summary?.insuranceThisYear && summary.insuranceThisYear > 0 && (
+                <p className="text-xs text-blue-600 mt-1">
+                  {formatCurrency(summary.insuranceThisYear)} from insurance
                 </p>
               )}
             </div>
@@ -271,12 +292,20 @@ export default function ReportsPage() {
                   >
                     <div>
                       <p className="font-medium text-gray-900">{formatWeekLabel(week.weekStart)}</p>
-                      <p className="text-xs text-gray-500">{week.visitCount} visits</p>
+                      <p className="text-xs text-gray-500">{week.visitCount} {visitLabel}</p>
                     </div>
                     <div className="text-right">
                       <p className="font-semibold text-gray-900">{formatCurrency(week.total)}</p>
-                      {week.copays > 0 && (
-                        <p className="text-xs text-gray-500">{formatCurrency(week.copays)} copays</p>
+                      {/* Show breakdown for insurance practices */}
+                      {!isCashOnly && (week.copays > 0 || (week.insurancePayments && week.insurancePayments > 0)) && (
+                        <div className="text-xs space-y-0.5">
+                          {week.copays > 0 && (
+                            <p className="text-gray-500">{formatCurrency(week.copays)} collected</p>
+                          )}
+                          {week.insurancePayments && week.insurancePayments > 0 && (
+                            <p className="text-blue-600">{formatCurrency(week.insurancePayments)} insurance</p>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -289,12 +318,20 @@ export default function ReportsPage() {
                   >
                     <div>
                       <p className="font-medium text-gray-900">{month.monthLabel}</p>
-                      <p className="text-xs text-gray-500">{month.visitCount} visits</p>
+                      <p className="text-xs text-gray-500">{month.visitCount} {visitLabel}</p>
                     </div>
                     <div className="text-right">
                       <p className="font-semibold text-gray-900">{formatCurrency(month.total)}</p>
-                      {month.copays > 0 && (
-                        <p className="text-xs text-gray-500">{formatCurrency(month.copays)} copays</p>
+                      {/* Show breakdown for insurance practices */}
+                      {!isCashOnly && (month.copays > 0 || (month.insurancePayments && month.insurancePayments > 0)) && (
+                        <div className="text-xs space-y-0.5">
+                          {month.copays > 0 && (
+                            <p className="text-gray-500">{formatCurrency(month.copays)} collected</p>
+                          )}
+                          {month.insurancePayments && month.insurancePayments > 0 && (
+                            <p className="text-blue-600">{formatCurrency(month.insurancePayments)} insurance</p>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -307,12 +344,20 @@ export default function ReportsPage() {
                   >
                     <div>
                       <p className="font-medium text-gray-900">{year.year}</p>
-                      <p className="text-xs text-gray-500">{year.visitCount} visits</p>
+                      <p className="text-xs text-gray-500">{year.visitCount} {visitLabel}</p>
                     </div>
                     <div className="text-right">
                       <p className="font-semibold text-gray-900">{formatCurrency(year.total)}</p>
-                      {year.copays > 0 && (
-                        <p className="text-xs text-gray-500">{formatCurrency(year.copays)} copays</p>
+                      {/* Show breakdown for insurance practices */}
+                      {!isCashOnly && (year.copays > 0 || (year.insurancePayments && year.insurancePayments > 0)) && (
+                        <div className="text-xs space-y-0.5">
+                          {year.copays > 0 && (
+                            <p className="text-gray-500">{formatCurrency(year.copays)} collected</p>
+                          )}
+                          {year.insurancePayments && year.insurancePayments > 0 && (
+                            <p className="text-blue-600">{formatCurrency(year.insurancePayments)} insurance</p>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>

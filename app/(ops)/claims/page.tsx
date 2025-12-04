@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatDate } from '@/lib/date-utils';
 import type { PatientNonPhi, ClaimNonPhi, ClaimStatus } from '@/lib/types-ops';
 import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
+import { usePracticeConfig } from '@/lib/practice-config';
 
 interface ClaimWithPatient extends ClaimNonPhi {
   patient?: PatientNonPhi;
@@ -43,6 +44,16 @@ function ClaimsContent() {
   const showNewForm = searchParams.get('action') === 'new';
   const preselectedPatientId = searchParams.get('patientId');
 
+  // Check if claims are enabled for this practice type
+  const { features } = usePracticeConfig();
+
+  // Redirect cash-only practices away from claims
+  useEffect(() => {
+    if (!features.showClaims) {
+      router.replace('/dashboard');
+    }
+  }, [features.showClaims, router]);
+
   const [claims, setClaims] = useState<ClaimWithPatient[]>([]);
   const [patients, setPatients] = useState<PatientNonPhi[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,7 +63,7 @@ function ClaimsContent() {
   const [portalFilter, setPortalFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'list' | 'portal'>('list');
 
-  // Form state
+  // Form state for new claim
   const [selectedPatientId, setSelectedPatientId] = useState(preselectedPatientId || '');
   const [dateOfService, setDateOfService] = useState(new Date().toISOString().split('T')[0]);
   const [insurerName, setInsurerName] = useState('');
@@ -60,17 +71,11 @@ function ClaimsContent() {
   const [billedAmount, setBilledAmount] = useState('');
   const [claimNotes, setClaimNotes] = useState('');
 
-  useEffect(() => {
-    loadData();
-    // Refresh data when page becomes visible (user navigates back)
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        loadData();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
+  // Mark Paid dialog state
+  const [showPaidDialog, setShowPaidDialog] = useState(false);
+  const [claimToPay, setClaimToPay] = useState<ClaimWithPatient | null>(null);
+  const [paidAmount, setPaidAmount] = useState('');
+  const [savingPaid, setSavingPaid] = useState(false);
 
   const loadData = async () => {
     const supabase = createClient();
@@ -96,6 +101,26 @@ function ClaimsContent() {
     setPatients(patientsResult.data || []);
     setLoading(false);
   };
+
+  // Load data on mount and when page becomes visible
+  useEffect(() => {
+    // Only load data if claims are enabled
+    if (features.showClaims) {
+      loadData();
+    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && features.showClaims) {
+        loadData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [features.showClaims]);
+
+  // Don't render anything while redirecting (after all hooks)
+  if (!features.showClaims) {
+    return <LoadingSpinner text="Redirecting..." />;
+  }
 
   const handleAddClaim = async () => {
     if (!selectedPatientId || !dateOfService) return;
@@ -127,6 +152,7 @@ function ClaimsContent() {
       setBilledAmount('');
       setClaimNotes('');
       loadData();
+      router.refresh();
       router.replace('/claims');
     }
     setSaving(false);
@@ -138,9 +164,8 @@ function ClaimsContent() {
 
     if (newStatus === 'SUBMITTED') {
       updates.date_submitted = new Date().toISOString().split('T')[0];
-    } else if (newStatus === 'PAID') {
-      updates.date_paid = new Date().toISOString().split('T')[0];
     }
+    // Note: PAID status is handled by handleMarkPaid with paid_amount dialog
 
     await supabase
       .from('claims_non_phi')
@@ -148,6 +173,59 @@ function ClaimsContent() {
       .eq('id', claimId);
 
     loadData();
+    router.refresh();
+  };
+
+  // Open the Mark Paid dialog
+  const openMarkPaidDialog = (claim: ClaimWithPatient) => {
+    setClaimToPay(claim);
+    setPaidAmount(claim.billed_amount?.toString() || '');
+    setShowPaidDialog(true);
+  };
+
+  // Handle marking claim as paid with actual paid amount
+  const handleMarkPaid = async () => {
+    if (!claimToPay || !paidAmount) return;
+
+    setSavingPaid(true);
+    const supabase = createClient();
+
+    // Try to update with paid_amount first
+    let { error } = await supabase
+      .from('claims_non_phi')
+      .update({
+        status: 'PAID',
+        date_paid: new Date().toISOString().split('T')[0],
+        paid_amount: parseFloat(paidAmount),
+      })
+      .eq('id', claimToPay.id);
+
+    // If paid_amount column doesn't exist, try without it
+    if (error && (error.message?.includes('paid_amount') || error.code === 'PGRST204')) {
+      console.log('paid_amount column not found, updating without it');
+      const result = await supabase
+        .from('claims_non_phi')
+        .update({
+          status: 'PAID',
+          date_paid: new Date().toISOString().split('T')[0],
+        })
+        .eq('id', claimToPay.id);
+      error = result.error;
+    }
+
+    if (error) {
+      console.error('Error marking claim as paid:', error);
+      alert('Failed to mark claim as paid. Please try again.');
+      setSavingPaid(false);
+      return;
+    }
+
+    setShowPaidDialog(false);
+    setClaimToPay(null);
+    setPaidAmount('');
+    setSavingPaid(false);
+    loadData();
+    router.refresh();
   };
 
   const pendingClaims = claims.filter(c => ['TO_SUBMIT', 'SUBMITTED', 'PENDING', 'APPEAL'].includes(c.status));
@@ -278,6 +356,78 @@ function ClaimsContent() {
         </Dialog>
       </header>
 
+      {/* Mark Paid Dialog */}
+      <Dialog open={showPaidDialog} onOpenChange={setShowPaidDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mark Claim as Paid</DialogTitle>
+          </DialogHeader>
+          {claimToPay && (
+            <div className="space-y-4 pt-4">
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="font-medium text-gray-900">{claimToPay.patient?.display_name}</p>
+                <p className="text-sm text-gray-500">
+                  {claimToPay.date_of_service ? formatDate(claimToPay.date_of_service) : 'No date'}
+                  {claimToPay.insurer_name && ` - ${claimToPay.insurer_name}`}
+                </p>
+                <p className="text-sm text-gray-500 mt-1">
+                  Billed: ${claimToPay.billed_amount?.toFixed(2) || '0.00'}
+                </p>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700">
+                  Amount Paid by Insurance *
+                </label>
+                <p className="text-xs text-gray-500 mb-1">
+                  Enter the actual amount received (may differ from billed amount)
+                </p>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={paidAmount}
+                  onChange={(e) => setPaidAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="mt-1"
+                />
+              </div>
+
+              {claimToPay.billed_amount && paidAmount && parseFloat(paidAmount) !== claimToPay.billed_amount && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+                  <p className="font-medium text-amber-800">
+                    Adjustment: ${(claimToPay.billed_amount - parseFloat(paidAmount)).toFixed(2)}
+                  </p>
+                  <p className="text-xs text-amber-600">
+                    Difference between billed (${claimToPay.billed_amount.toFixed(2)}) and paid (${parseFloat(paidAmount).toFixed(2)})
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowPaidDialog(false);
+                    setClaimToPay(null);
+                    setPaidAmount('');
+                  }}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleMarkPaid}
+                  disabled={savingPaid || !paidAmount}
+                  className="flex-1 bg-green-600 hover:bg-green-700"
+                >
+                  {savingPaid ? 'Saving...' : 'Mark as Paid'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Portals to Check Today */}
       {portalsWithPendingClaims.length > 0 && (
         <Card className="border-amber-200 bg-amber-50">
@@ -364,6 +514,7 @@ function ClaimsContent() {
                   key={claim.id}
                   claim={claim}
                   onStatusChange={handleStatusChange}
+                  onMarkPaid={openMarkPaidDialog}
                 />
               ))
             ) : (
@@ -382,6 +533,7 @@ function ClaimsContent() {
                   key={claim.id}
                   claim={claim}
                   onStatusChange={handleStatusChange}
+                  onMarkPaid={openMarkPaidDialog}
                 />
               ))
             ) : (
@@ -421,6 +573,7 @@ function ClaimsContent() {
                       key={claim.id}
                       claim={claim}
                       onStatusChange={handleStatusChange}
+                      onMarkPaid={openMarkPaidDialog}
                       compact
                     />
                   ))}
@@ -455,11 +608,13 @@ function getDaysPending(claim: ClaimWithPatient): number | null {
 function ClaimCard({
   claim,
   onStatusChange,
+  onMarkPaid,
   compact = false,
   thresholdDays = 21,
 }: {
   claim: ClaimWithPatient;
   onStatusChange: (id: string, status: ClaimStatus) => void;
+  onMarkPaid: (claim: ClaimWithPatient) => void;
   compact?: boolean;
   thresholdDays?: number;
 }) {
@@ -467,6 +622,11 @@ function ClaimCard({
   const portalConfig = PORTAL_OPTIONS.find(p => p.value === claim.portal_name);
   const daysPending = getDaysPending(claim);
   const isOverdue = daysPending !== null && daysPending >= thresholdDays;
+
+  // For paid claims, show the actual paid amount
+  const isPaid = claim.status === 'PAID';
+  const displayAmount = isPaid && claim.paid_amount != null ? claim.paid_amount : claim.billed_amount;
+  const hasAdjustment = isPaid && claim.paid_amount != null && claim.billed_amount != null && claim.paid_amount !== claim.billed_amount;
 
   return (
     <Card className={`${compact ? 'border-gray-100' : ''} ${isOverdue ? 'border-red-200 bg-red-50/30' : ''}`}>
@@ -489,7 +649,14 @@ function ClaimCard({
             )}
           </div>
           <div className="text-right flex flex-col items-end gap-1">
-            <p className="font-semibold">${claim.billed_amount?.toFixed(2) || '0.00'}</p>
+            <p className={`font-semibold ${isPaid ? 'text-green-600' : ''}`}>
+              ${displayAmount?.toFixed(2) || '0.00'}
+            </p>
+            {hasAdjustment && (
+              <p className="text-xs text-gray-400 line-through">
+                Billed: ${claim.billed_amount?.toFixed(2)}
+              </p>
+            )}
             <div className="flex gap-1">
               {!compact && claim.portal_name && (
                 <Badge variant="outline" className={`text-xs ${portalConfig?.color || ''}`}>
@@ -533,7 +700,7 @@ function ClaimCard({
                 size="sm"
                 variant="outline"
                 className="text-green-600"
-                onClick={() => onStatusChange(claim.id, 'PAID')}
+                onClick={() => onMarkPaid(claim)}
               >
                 Mark Paid
               </Button>
@@ -562,7 +729,7 @@ function ClaimCard({
                 size="sm"
                 variant="outline"
                 className="text-green-600"
-                onClick={() => onStatusChange(claim.id, 'PAID')}
+                onClick={() => onMarkPaid(claim)}
               >
                 Appeal Won - Paid
               </Button>
@@ -577,11 +744,22 @@ function ClaimCard({
             </>
           )}
           {claim.status === 'PAID' && (
-            <span className="text-xs text-gray-400 italic">Claim completed</span>
+            <span className="text-xs text-green-600 italic flex items-center gap-1">
+              <CheckIcon className="w-3 h-3" />
+              Paid {claim.date_paid ? formatDate(claim.date_paid) : ''}
+            </span>
           )}
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+    </svg>
   );
 }
 

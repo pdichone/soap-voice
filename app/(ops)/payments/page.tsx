@@ -11,18 +11,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { PatientNonPhi, PaymentNonPhi } from '@/lib/types-ops';
 import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
+import { ALL_PAYMENT_METHODS } from '@/lib/practice-config';
 
 interface PaymentWithPatient extends PaymentNonPhi {
   patient?: PatientNonPhi;
 }
-
-const PAYMENT_METHODS = [
-  { value: 'CASH', label: 'Cash' },
-  { value: 'CHECK', label: 'Check' },
-  { value: 'CARD', label: 'Card' },
-  { value: 'HSA', label: 'HSA/FSA' },
-  { value: 'OTHER', label: 'Other' },
-];
 
 function PaymentsContent() {
   const router = useRouter();
@@ -117,6 +110,7 @@ function PaymentsContent() {
       setMethod('CASH');
       setIsCopay(false);
       loadData();
+      router.refresh();
       router.replace('/payments');
     }
     setSaving(false);
@@ -178,7 +172,7 @@ function PaymentsContent() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {PAYMENT_METHODS.map((m) => (
+                    {ALL_PAYMENT_METHODS.map((m) => (
                       <SelectItem key={m.value} value={m.value}>
                         {m.label}
                       </SelectItem>
@@ -195,7 +189,7 @@ function PaymentsContent() {
                   className="rounded border-gray-300"
                 />
                 <label htmlFor="copay" className="text-sm text-gray-700">
-                  This is a copay
+                  Patient collection
                 </label>
               </div>
               <Button
@@ -254,11 +248,11 @@ function PaymentsContent() {
                           </p>
                           <div className="flex items-center gap-2 mt-1">
                             <Badge variant="outline" className="text-xs">
-                              {PAYMENT_METHODS.find(m => m.value === payment.method)?.label || payment.method}
+                              {ALL_PAYMENT_METHODS.find(m => m.value === payment.method)?.label || payment.method}
                             </Badge>
                             {payment.is_copay && (
                               <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700">
-                                Copay
+                                Collect
                               </Badge>
                             )}
                           </div>

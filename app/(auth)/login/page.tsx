@@ -63,7 +63,8 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        // Use /auth/confirm for client-side handling of hash fragments
+        emailRedirectTo: `${window.location.origin}/auth/confirm`,
       },
     });
 

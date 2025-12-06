@@ -21,12 +21,18 @@ import type {
   PaymentExport,
 } from '@/lib/types-ops';
 import { usePracticeConfig } from '@/lib/practice-config';
+import { useFeatureFlags } from '@/lib/feature-flags';
+import { createClient } from '@/lib/supabase';
+import { generateChargesSummaryPDF, downloadPDF } from '@/components/ops/ChargesSummaryPDF';
+import { GenerateBusinessStatementDialog } from '@/components/ops/GenerateBusinessStatementDialog';
+import type { PracticeSettings, PatientNonPhi, PaymentNonPhi, ChargesSummaryData } from '@/lib/types-ops';
 
 type ViewPeriod = 'weekly' | 'monthly' | 'yearly';
 
 export default function ReportsPage() {
   // Get practice config for terminology
   const { features, practiceType } = usePracticeConfig();
+  const { flags: featureFlags } = useFeatureFlags();
   const isCashOnly = practiceType === 'cash_only';
   const visitLabel = features.visitLabelPlural.toLowerCase();
 
@@ -38,6 +44,16 @@ export default function ReportsPage() {
   const [yearlyData, setYearlyData] = useState<YearlyEarning[]>([]);
   const [methodBreakdown, setMethodBreakdown] = useState<PaymentMethodBreakdown[]>([]);
   const [exporting, setExporting] = useState(false);
+
+  // Bulk summary generation state
+  const currentYear = new Date().getFullYear();
+  const [summaryYear, setSummaryYear] = useState(currentYear);
+  const [patientsWithPayments, setPatientsWithPayments] = useState(0);
+  const [generatingBulk, setGeneratingBulk] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
+
+  // Business tax statement dialog
+  const [showBusinessStatementDialog, setShowBusinessStatementDialog] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -55,6 +71,158 @@ export default function ReportsPage() {
   useEffect(() => {
     loadBreakdown();
   }, [viewPeriod]);
+
+  // Load patient count for summary year
+  useEffect(() => {
+    loadPatientsWithPaymentsCount();
+  }, [summaryYear]);
+
+  const loadPatientsWithPaymentsCount = async () => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const startDate = new Date(summaryYear, 0, 1).toISOString();
+    const endDate = new Date(summaryYear, 11, 31, 23, 59, 59).toISOString();
+
+    // Get distinct patient IDs with payments in this year
+    const { data } = await supabase
+      .from('payments_non_phi')
+      .select('patient_id')
+      .eq('owner_user_id', user.id)
+      .gte('created_at', startDate)
+      .lte('created_at', endDate);
+
+    const uniquePatients = new Set(data?.map(p => p.patient_id) || []);
+    setPatientsWithPayments(uniquePatients.size);
+  };
+
+  const handleBulkGenerateSummaries = async () => {
+    setGeneratingBulk(true);
+    setBulkProgress({ current: 0, total: 0 });
+
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setGeneratingBulk(false);
+        return;
+      }
+
+      // Get practice settings for header
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('practice_id')
+        .eq('id', user.id)
+        .single();
+
+      let practiceSettings: PracticeSettings = {};
+      if (profile?.practice_id) {
+        const { data: practice } = await supabase
+          .from('practices')
+          .select('settings')
+          .eq('id', profile.practice_id)
+          .single();
+        if (practice?.settings) {
+          practiceSettings = practice.settings as PracticeSettings;
+        }
+      }
+
+      // Get date range for the year
+      const startDate = new Date(summaryYear, 0, 1).toISOString();
+      const endDate = new Date(summaryYear, 11, 31, 23, 59, 59).toISOString();
+
+      // Get all payments for this year
+      const { data: payments } = await supabase
+        .from('payments_non_phi')
+        .select('*')
+        .eq('owner_user_id', user.id)
+        .gte('created_at', startDate)
+        .lte('created_at', endDate)
+        .order('created_at', { ascending: true });
+
+      if (!payments || payments.length === 0) {
+        alert('No payments found for this year');
+        setGeneratingBulk(false);
+        return;
+      }
+
+      // Group payments by patient
+      const paymentsByPatient: Record<string, PaymentNonPhi[]> = {};
+      payments.forEach(p => {
+        if (!paymentsByPatient[p.patient_id]) {
+          paymentsByPatient[p.patient_id] = [];
+        }
+        paymentsByPatient[p.patient_id].push(p);
+      });
+
+      const patientIds = Object.keys(paymentsByPatient);
+      setBulkProgress({ current: 0, total: patientIds.length });
+
+      // Get patient names
+      const { data: patients } = await supabase
+        .from('patients_non_phi')
+        .select('id, display_name')
+        .in('id', patientIds);
+
+      const patientMap = new Map<string, PatientNonPhi>();
+      patients?.forEach(p => patientMap.set(p.id, p as PatientNonPhi));
+
+      // Generate PDFs sequentially with a small delay
+      for (let i = 0; i < patientIds.length; i++) {
+        const patientId = patientIds[i];
+        const patient = patientMap.get(patientId);
+        const patientPayments = paymentsByPatient[patientId];
+
+        if (!patient) continue;
+
+        const totalPaid = patientPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+        const summaryData: ChargesSummaryData = {
+          practice: practiceSettings,
+          patient: {
+            display_name: patient.display_name,
+          },
+          date_range: {
+            start: `January 1, ${summaryYear}`,
+            end: `December 31, ${summaryYear}`,
+          },
+          payments: patientPayments.map((p) => ({
+            date: new Date(p.created_at).toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            }),
+            amount: p.amount || 0,
+            method: p.method,
+          })),
+          totals: {
+            visit_count: patientPayments.length,
+            total_paid: totalPaid,
+          },
+          generated_at: new Date().toLocaleDateString('en-US', {
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric',
+          }),
+        };
+
+        const pdf = await generateChargesSummaryPDF(summaryData);
+        downloadPDF(pdf);
+        // Clean up blob URL to prevent memory leaks
+        URL.revokeObjectURL(pdf.url);
+        setBulkProgress({ current: i + 1, total: patientIds.length });
+
+        // Small delay between downloads to prevent browser issues
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    } catch (error) {
+      console.error('Bulk generation failed:', error);
+      alert('Failed to generate statements');
+    }
+
+    setGeneratingBulk(false);
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -405,6 +573,123 @@ export default function ReportsPage() {
         </CardContent>
       </Card>
 
+      {/* Year-End Statements - Prominent Feature Section (controlled by feature flag) */}
+      {featureFlags.feature_year_end_summary && (
+        <Card className="border-2 border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 shadow-md">
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-amber-100 rounded-lg">
+                <FileTextIcon className="w-5 h-5 text-amber-700" />
+              </div>
+              <div>
+                <CardTitle className="text-lg text-amber-900">Year-End Statements</CardTitle>
+                <CardDescription className="text-amber-700">
+                  Generate tax-ready payment statements for {isCashOnly ? 'clients' : 'patients'}
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-medium text-amber-800">Year:</label>
+              <Select
+                value={summaryYear.toString()}
+                onValueChange={(v) => setSummaryYear(parseInt(v))}
+              >
+                <SelectTrigger className="w-24 border-amber-300 bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={currentYear.toString()}>{currentYear}</SelectItem>
+                  <SelectItem value={(currentYear - 1).toString()}>{currentYear - 1}</SelectItem>
+                  <SelectItem value={(currentYear - 2).toString()}>{currentYear - 2}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="bg-white/80 rounded-lg p-4 border border-amber-200">
+              {generatingBulk ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-amber-800">Generating statements...</span>
+                    <span className="text-sm text-amber-600">
+                      {bulkProgress.current} / {bulkProgress.total}
+                    </span>
+                  </div>
+                  <div className="h-2 bg-amber-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-amber-500 rounded-full transition-all"
+                      style={{
+                        width: bulkProgress.total > 0
+                          ? `${(bulkProgress.current / bulkProgress.total) * 100}%`
+                          : '0%'
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : patientsWithPayments > 0 ? (
+                <div className="space-y-3">
+                  <Button
+                    onClick={handleBulkGenerateSummaries}
+                    className="w-full bg-amber-600 hover:bg-amber-700 text-white font-semibold py-3"
+                    size="lg"
+                  >
+                    <FileTextIcon className="w-5 h-5 mr-2" />
+                    Generate All {summaryYear} Statements
+                  </Button>
+                  <p className="text-sm text-amber-700 text-center">
+                    Creates PDFs for <span className="font-semibold">{patientsWithPayments}</span> {isCashOnly ? 'client' : 'patient'}{patientsWithPayments !== 1 ? 's' : ''} with payments in {summaryYear}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-amber-600 text-center py-2">
+                  No payments found for {summaryYear}
+                </p>
+              )}
+            </div>
+
+            <p className="text-xs text-amber-600 text-center">
+              Or generate individually from each {isCashOnly ? "client's" : "patient's"} Payments tab.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Business Tax Statement - For the Business Owner/Accountant */}
+      <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-md">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-blue-100 rounded-lg">
+              <BriefcaseIcon className="w-5 h-5 text-blue-700" />
+            </div>
+            <div>
+              <CardTitle className="text-lg text-blue-900">Annual Income Statement</CardTitle>
+              <CardDescription className="text-blue-700">
+                Comprehensive tax statement for your accountant or bookkeeper
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="text-xs text-blue-600 space-y-1">
+            <p className="font-medium">Includes:</p>
+            <ul className="list-disc list-inside space-y-0.5 ml-1">
+              <li>Monthly & quarterly revenue breakdown</li>
+              <li>Payment method analysis (cash vs. card)</li>
+              <li>Client statistics & averages</li>
+              <li>Tax preparation notes</li>
+            </ul>
+          </div>
+          <Button
+            onClick={() => setShowBusinessStatementDialog(true)}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+          >
+            <BriefcaseIcon className="w-4 h-4 mr-2" />
+            Generate Income Statement
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Export All Payments */}
       <Card>
         <CardContent className="pt-4">
@@ -425,6 +710,12 @@ export default function ReportsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Business Statement Dialog */}
+      <GenerateBusinessStatementDialog
+        open={showBusinessStatementDialog}
+        onOpenChange={setShowBusinessStatementDialog}
+      />
     </div>
   );
 }
@@ -433,6 +724,22 @@ function DownloadIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+    </svg>
+  );
+}
+
+function FileTextIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+  );
+}
+
+function BriefcaseIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
     </svg>
   );
 }

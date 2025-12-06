@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { usePracticeConfig } from '@/lib/practice-config';
+import { useFeatureFlags } from '@/lib/feature-flags';
 
 interface NavItem {
   href: string;
@@ -10,13 +11,14 @@ interface NavItem {
   dynamicLabel?: 'patients' | 'visits';
   icon: React.FC<{ className?: string }>;
   requiresClaims?: boolean;
+  requiresIntakeForms?: boolean;
 }
 
 const allNavItems: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboardIcon },
   { href: '/patients', label: 'Patients', dynamicLabel: 'patients', icon: UsersIcon },
   { href: '/visits', label: 'Visits', dynamicLabel: 'visits', icon: CalendarIcon },
-  { href: '/intake-forms', label: 'Intake', icon: ClipboardIcon },
+  { href: '/intake-forms', label: 'Intake', icon: ClipboardIcon, requiresIntakeForms: true },
   { href: '/claims', label: 'Claims', icon: FileTextIcon, requiresClaims: true },
   { href: '/reports', label: 'Reports', icon: ChartIcon },
 ];
@@ -24,10 +26,18 @@ const allNavItems: NavItem[] = [
 export function OpsNav() {
   const pathname = usePathname();
   const { features } = usePracticeConfig();
+  const { flags: adminFlags } = useFeatureFlags();
 
-  // Filter nav items based on practice features
+  // Claims shown only if: practice type supports it AND admin has enabled the feature
+  const showClaims = features.showClaims && adminFlags.feature_claims_tracking;
+
+  // Intake forms shown only if admin has enabled the feature
+  const showIntakeForms = adminFlags.feature_intake_forms;
+
+  // Filter nav items based on practice features and admin flags
   const navItems = allNavItems.filter(item => {
-    if (item.requiresClaims && !features.showClaims) return false;
+    if (item.requiresClaims && !showClaims) return false;
+    if (item.requiresIntakeForms && !showIntakeForms) return false;
     return true;
   });
 

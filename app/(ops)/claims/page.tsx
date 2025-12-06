@@ -11,9 +11,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatDate } from '@/lib/date-utils';
-import type { PatientNonPhi, ClaimNonPhi, ClaimStatus } from '@/lib/types-ops';
+import type { PatientNonPhi, ClaimNonPhi, ClaimStatus, Portal } from '@/lib/types-ops';
 import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
 import { usePracticeConfig } from '@/lib/practice-config';
+import { useFeatureFlags } from '@/lib/feature-flags';
 
 interface ClaimWithPatient extends ClaimNonPhi {
   patient?: PatientNonPhi;
@@ -28,15 +29,41 @@ const CLAIM_STATUSES: { value: ClaimStatus; label: string; color: string }[] = [
   { value: 'APPEAL', label: 'Appeal', color: 'bg-purple-100 text-purple-800' },
 ];
 
-const PORTAL_OPTIONS = [
-  { value: 'AVAILITY', label: 'Availity', color: 'bg-blue-50 text-blue-700 border-blue-200' },
-  { value: 'OFFICE_ALLY', label: 'Office Ally', color: 'bg-green-50 text-green-700 border-green-200' },
-  { value: 'UHC_PORTAL', label: 'UHC Portal', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-  { value: 'UMR_PORTAL', label: 'UMR Portal', color: 'bg-purple-50 text-purple-700 border-purple-200' },
-  { value: 'ONE_HEALTH_PORT', label: 'OneHealthPort', color: 'bg-teal-50 text-teal-700 border-teal-200' },
-  { value: 'BOULDER', label: 'Boulder Admin', color: 'bg-orange-50 text-orange-700 border-orange-200' },
-  { value: 'OTHER', label: 'Other', color: 'bg-gray-50 text-gray-700 border-gray-200' },
+// Portal badge colors - assigned dynamically based on index
+const PORTAL_COLORS = [
+  'bg-blue-50 text-blue-700 border-blue-200',
+  'bg-green-50 text-green-700 border-green-200',
+  'bg-indigo-50 text-indigo-700 border-indigo-200',
+  'bg-purple-50 text-purple-700 border-purple-200',
+  'bg-teal-50 text-teal-700 border-teal-200',
+  'bg-orange-50 text-orange-700 border-orange-200',
+  'bg-pink-50 text-pink-700 border-pink-200',
+  'bg-cyan-50 text-cyan-700 border-cyan-200',
+  'bg-amber-50 text-amber-700 border-amber-200',
+  'bg-lime-50 text-lime-700 border-lime-200',
 ];
+
+// Default portals to seed if none exist
+const DEFAULT_PORTALS = [
+  { name: 'Office Ally', url: 'https://www.officeally.com', sort_order: 1 },
+  { name: 'Availity', url: 'https://www.availity.com', sort_order: 2 },
+  { name: 'One Health Port', url: 'https://www.onehealthport.com', sort_order: 3 },
+  { name: 'Premera', url: 'https://www.premera.com/provider', sort_order: 4 },
+  { name: 'Regence', url: 'https://www.regence.com/provider', sort_order: 5 },
+  { name: 'Aetna', url: 'https://www.aetna.com/providers', sort_order: 6 },
+  { name: 'UnitedHealthcare', url: 'https://www.uhcprovider.com', sort_order: 7 },
+  { name: 'Cigna', url: 'https://www.cigna.com/providers', sort_order: 8 },
+  { name: 'Molina', url: 'https://www.molinahealthcare.com/providers', sort_order: 9 },
+  { name: 'Blue Cross', url: 'https://www.bluecross.com', sort_order: 10 },
+];
+
+function getPortalColor(portalName: string, portals: Portal[]): string {
+  const index = portals.findIndex(p => p.name === portalName);
+  if (index >= 0) {
+    return PORTAL_COLORS[index % PORTAL_COLORS.length];
+  }
+  return 'bg-gray-50 text-gray-700 border-gray-200';
+}
 
 function ClaimsContent() {
   const router = useRouter();
@@ -44,18 +71,20 @@ function ClaimsContent() {
   const showNewForm = searchParams.get('action') === 'new';
   const preselectedPatientId = searchParams.get('patientId');
 
-  // Check if claims are enabled for this practice type
+  // Check if claims are enabled for this practice type and feature flag
   const { features } = usePracticeConfig();
+  const { flags: featureFlags } = useFeatureFlags();
 
-  // Redirect cash-only practices away from claims
+  // Redirect if claims are disabled (by practice type or feature flag)
   useEffect(() => {
-    if (!features.showClaims) {
+    if (!features.showClaims || !featureFlags.feature_claims_tracking) {
       router.replace('/dashboard');
     }
-  }, [features.showClaims, router]);
+  }, [features.showClaims, featureFlags.feature_claims_tracking, router]);
 
   const [claims, setClaims] = useState<ClaimWithPatient[]>([]);
   const [patients, setPatients] = useState<PatientNonPhi[]>([]);
+  const [portals, setPortals] = useState<Portal[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(showNewForm);
   const [saving, setSaving] = useState(false);
@@ -82,8 +111,15 @@ function ClaimsContent() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
+    // Get user's practice_id for portals
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('practice_id')
+      .eq('id', user.id)
+      .single();
+
     // Run queries in parallel for faster loading
-    const [claimsResult, patientsResult] = await Promise.all([
+    const [claimsResult, patientsResult, portalsResult] = await Promise.all([
       supabase
         .from('claims_non_phi')
         .select('*, patient:patients_non_phi(id, display_name, insurer_name)')
@@ -95,10 +131,46 @@ function ClaimsContent() {
         .eq('owner_user_id', user.id)
         .eq('is_active', true)
         .order('display_name'),
+      profile?.practice_id
+        ? supabase
+            .from('portals')
+            .select('*')
+            .eq('practice_id', profile.practice_id)
+            .eq('is_active', true)
+            .order('sort_order', { ascending: true })
+        : Promise.resolve({ data: null }),
     ]);
 
-    setClaims(claimsResult.data || []);
-    setPatients(patientsResult.data || []);
+    setClaims((claimsResult.data as ClaimWithPatient[]) || []);
+    setPatients((patientsResult.data as PatientNonPhi[]) || []);
+
+    // If no portals exist, seed defaults
+    let portalsData = portalsResult.data as Portal[] | null;
+    if (profile?.practice_id && (!portalsData || portalsData.length === 0)) {
+      console.log('No portals found in claims page, seeding defaults for practice:', profile.practice_id);
+      const defaultPortalsWithPractice = DEFAULT_PORTALS.map(p => ({
+        ...p,
+        practice_id: profile.practice_id,
+        is_active: true,
+      }));
+
+      const { error: seedError } = await supabase
+        .from('portals')
+        .insert(defaultPortalsWithPractice);
+
+      if (!seedError) {
+        // Re-fetch portals after seeding
+        const { data: refreshedPortals } = await supabase
+          .from('portals')
+          .select('*')
+          .eq('practice_id', profile.practice_id)
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true });
+        portalsData = refreshedPortals;
+      }
+    }
+
+    setPortals(portalsData || []);
     setLoading(false);
   };
 
@@ -316,13 +388,24 @@ function ClaimsContent() {
                     <SelectValue placeholder="Select portal" />
                   </SelectTrigger>
                   <SelectContent>
-                    {PORTAL_OPTIONS.map((portal) => (
-                      <SelectItem key={portal.value} value={portal.value}>
-                        {portal.label}
+                    {portals.length > 0 ? (
+                      portals.map((portal) => (
+                        <SelectItem key={portal.id} value={portal.name}>
+                          {portal.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="Other" disabled>
+                        No portals configured
                       </SelectItem>
-                    ))}
+                    )}
                   </SelectContent>
                 </Select>
+                {portals.length === 0 && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Configure portals in Settings
+                  </p>
+                )}
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-700">Billed Amount</label>
@@ -436,20 +519,20 @@ function ClaimsContent() {
           </CardHeader>
           <CardContent className="pt-0">
             <div className="flex flex-wrap gap-2">
-              {portalsWithPendingClaims.map(portal => {
-                const portalConfig = PORTAL_OPTIONS.find(p => p.value === portal);
-                const count = pendingClaims.filter(c => c.portal_name === portal).length;
+              {portalsWithPendingClaims.map(portalName => {
+                const count = pendingClaims.filter(c => c.portal_name === portalName).length;
+                const portalColor = getPortalColor(portalName || '', portals);
                 return (
                   <Badge
-                    key={portal}
+                    key={portalName}
                     variant="outline"
-                    className={`cursor-pointer ${portalConfig?.color || ''}`}
+                    className={`cursor-pointer ${portalColor}`}
                     onClick={() => {
-                      setPortalFilter(portal || 'all');
+                      setPortalFilter(portalName || 'all');
                       setActiveTab('pending');
                     }}
                   >
-                    {portalConfig?.label || portal} ({count})
+                    {portalName} ({count})
                   </Badge>
                 );
               })}
@@ -484,9 +567,9 @@ function ClaimsContent() {
             <SelectContent>
               <SelectItem value="all">All Portals</SelectItem>
               <SelectItem value="unassigned">Unassigned</SelectItem>
-              {PORTAL_OPTIONS.map((portal) => (
-                <SelectItem key={portal.value} value={portal.value}>
-                  {portal.label}
+              {portals.map((portal) => (
+                <SelectItem key={portal.id} value={portal.name}>
+                  {portal.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -515,6 +598,7 @@ function ClaimsContent() {
                   claim={claim}
                   onStatusChange={handleStatusChange}
                   onMarkPaid={openMarkPaidDialog}
+                  portals={portals}
                 />
               ))
             ) : (
@@ -534,6 +618,7 @@ function ClaimsContent() {
                   claim={claim}
                   onStatusChange={handleStatusChange}
                   onMarkPaid={openMarkPaidDialog}
+                  portals={portals}
                 />
               ))
             ) : (
@@ -549,14 +634,14 @@ function ClaimsContent() {
         // Portal grouped view
         <div className="space-y-6">
           {Object.entries(groupByPortal(pendingClaims)).map(([portal, portalClaims]) => {
-            const portalConfig = PORTAL_OPTIONS.find(p => p.value === portal);
+            const portalColor = getPortalColor(portal === 'UNASSIGNED' ? '' : portal, portals);
             return (
               <Card key={portal}>
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-base font-medium flex items-center gap-2">
-                      <Badge variant="outline" className={portalConfig?.color || 'bg-gray-50'}>
-                        {portalConfig?.label || (portal === 'UNASSIGNED' ? 'Unassigned' : portal)}
+                      <Badge variant="outline" className={portalColor}>
+                        {portal === 'UNASSIGNED' ? 'Unassigned' : portal}
                       </Badge>
                       <span className="text-gray-500 font-normal">
                         {portalClaims.length} claim{portalClaims.length !== 1 ? 's' : ''}
@@ -574,6 +659,7 @@ function ClaimsContent() {
                       claim={claim}
                       onStatusChange={handleStatusChange}
                       onMarkPaid={openMarkPaidDialog}
+                      portals={portals}
                       compact
                     />
                   ))}
@@ -609,17 +695,19 @@ function ClaimCard({
   claim,
   onStatusChange,
   onMarkPaid,
+  portals,
   compact = false,
   thresholdDays = 21,
 }: {
   claim: ClaimWithPatient;
   onStatusChange: (id: string, status: ClaimStatus) => void;
   onMarkPaid: (claim: ClaimWithPatient) => void;
+  portals: Portal[];
   compact?: boolean;
   thresholdDays?: number;
 }) {
   const statusConfig = CLAIM_STATUSES.find(s => s.value === claim.status);
-  const portalConfig = PORTAL_OPTIONS.find(p => p.value === claim.portal_name);
+  const portalColor = getPortalColor(claim.portal_name || '', portals);
   const daysPending = getDaysPending(claim);
   const isOverdue = daysPending !== null && daysPending >= thresholdDays;
 
@@ -659,8 +747,8 @@ function ClaimCard({
             )}
             <div className="flex gap-1">
               {!compact && claim.portal_name && (
-                <Badge variant="outline" className={`text-xs ${portalConfig?.color || ''}`}>
-                  {portalConfig?.label || claim.portal_name}
+                <Badge variant="outline" className={`text-xs ${portalColor}`}>
+                  {claim.portal_name}
                 </Badge>
               )}
               <Badge variant="outline" className={statusConfig?.color}>

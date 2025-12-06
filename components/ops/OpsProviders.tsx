@@ -2,6 +2,7 @@
 
 import { ReactNode } from 'react';
 import { PracticeConfigProvider, usePracticeConfig } from '@/lib/practice-config';
+import { FeatureFlagsProvider } from '@/lib/feature-flags';
 import { Onboarding } from './Onboarding';
 
 interface OpsProvidersProps {
@@ -33,7 +34,9 @@ function OpsContent({ children }: { children: ReactNode }) {
 export function OpsProviders({ children }: OpsProvidersProps) {
   return (
     <PracticeConfigProvider>
-      <OpsContent>{children}</OpsContent>
+      <FeatureFlagsProvider>
+        <OpsContent>{children}</OpsContent>
+      </FeatureFlagsProvider>
     </PracticeConfigProvider>
   );
 }

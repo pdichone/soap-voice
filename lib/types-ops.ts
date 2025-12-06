@@ -17,8 +17,40 @@ export interface Practice {
 }
 
 export interface PracticeSettings {
+  // Practice branding for PDFs and documents
+  business_name?: string;
+  logo_url?: string;
+  address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  phone?: string;
+  website?: string;
   // Future extensibility for practice-specific settings
   [key: string]: unknown;
+}
+
+// Charges summary data for PDF generation
+export interface ChargesSummaryData {
+  practice: PracticeSettings;
+  patient: {
+    display_name: string;
+  };
+  date_range: {
+    start: string;
+    end: string;
+  };
+  payments: Array<{
+    date: string;
+    amount: number;
+    method: string;
+  }>;
+  totals: {
+    visit_count: number;
+    total_paid: number;
+  };
+  generated_at: string;
 }
 
 export interface PracticeUser {
@@ -72,6 +104,8 @@ export interface PatientNonPhi {
   updated_at: string;
 }
 
+export type ReferralStatus = 'active' | 'expired' | 'exhausted' | 'renewed';
+
 export interface ReferralNonPhi {
   id: string;
   patient_id: string;
@@ -82,6 +116,36 @@ export interface ReferralNonPhi {
   referral_start_date: string | null;
   referral_expiration_date: string | null;
   notes: string | null;
+  // Enhanced physician info
+  physician_name: string | null;
+  physician_npi: string | null;
+  physician_specialty: string | null;
+  physician_phone: string | null;
+  physician_fax: string | null;
+  physician_clinic: string | null;
+  // Authorization details
+  authorization_number: string | null;
+  payer: string | null;
+  // Medical codes (stored as arrays)
+  icd10_codes: string[] | null;
+  cpt_codes: string[] | null;
+  // Status tracking
+  status: ReferralStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Physician {
+  id: string;
+  practice_id: string | null;
+  owner_user_id: string;
+  name: string;
+  npi: string | null;
+  specialty: string | null;
+  clinic_name: string | null;
+  phone: string | null;
+  fax: string | null;
+  referral_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -293,4 +357,161 @@ export interface CollectionResult {
 
 export interface PatientWithBenefits extends PatientNonPhi {
   benefits?: PatientBenefits | null;
+}
+
+// =============================================
+// Portal Types (Claim Submission Portals)
+// =============================================
+export interface Portal {
+  id: string;
+  practice_id: string;
+  name: string;
+  url: string | null;
+  notes: string | null;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PortalWithClaimCount extends Portal {
+  claim_count?: number;
+}
+
+// =============================================
+// Super Admin Types
+// =============================================
+export type PractitionerStatus = 'active' | 'inactive' | 'suspended' | 'pending';
+export type PractitionerPlanType = 'trial' | 'solo' | 'professional' | 'enterprise' | 'founder' | 'custom';
+export type BillingStatus = 'trial' | 'paying' | 'overdue' | 'cancelled' | 'comped';
+export type AdminRole = 'admin' | 'super_admin' | 'support';
+export type EventActorType = 'admin' | 'practitioner' | 'system';
+
+export interface Practitioner {
+  id: string;
+  user_id: string | null;
+  email: string;
+  name: string;
+  workspace_id: string;
+  workspace_name: string | null;
+  status: PractitionerStatus;
+  plan_type: PractitionerPlanType;
+  monthly_price: number | null;
+  billing_status: BillingStatus;
+  trial_ends_at: string | null;
+  billing_started_at: string | null;
+  billing_notes: string | null;
+  feature_claims_tracking: boolean;
+  feature_year_end_summary: boolean;
+  feature_insurance_calculator: boolean;
+  feature_bulk_operations: boolean;
+  feature_intake_forms: boolean;
+  feature_documents: boolean;
+  practice_type: PracticeType;
+  last_login_at: string | null;
+  last_activity_at: string | null;
+  login_count: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  deleted_at: string | null;
+}
+
+export interface PractitionerWithStats extends Practitioner {
+  patient_count?: number;
+  visit_count?: number;
+  visits_this_week?: number;
+  visits_this_month?: number;
+  total_payments?: number;
+  payments_this_month?: number;
+  pending_claims_count?: number;
+}
+
+export interface AdminUser {
+  id: string;
+  user_id: string | null;
+  email: string;
+  name: string;
+  role: AdminRole;
+  is_active: boolean;
+  last_login_at: string | null;
+  created_at: string;
+}
+
+export interface AdminEvent {
+  id: string;
+  actor_type: EventActorType;
+  actor_id: string | null;
+  actor_email: string | null;
+  event_type: string;
+  event_category: string | null;
+  practitioner_id: string | null;
+  workspace_id: string | null;
+  description: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AdminEventWithPractitioner extends AdminEvent {
+  practitioner?: Practitioner | null;
+}
+
+export interface ImpersonationSession {
+  id: string;
+  admin_id: string;
+  practitioner_id: string;
+  started_at: string;
+  ended_at: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+}
+
+export interface ImpersonationSessionWithDetails extends ImpersonationSession {
+  admin?: AdminUser;
+  practitioner?: Practitioner;
+}
+
+export interface ImpersonationContext {
+  isImpersonating: boolean;
+  practitionerId: string | null;
+  practitionerName: string | null;
+  workspaceId: string | null;
+  sessionId: string | null;
+  adminReturnUrl: string | null;
+}
+
+export interface PractitionerCreateInput {
+  email: string;
+  name: string;
+  workspace_name?: string;
+  plan_type?: PractitionerPlanType;
+  billing_status?: BillingStatus;
+  monthly_price?: number;
+  trial_ends_at?: string;
+  billing_notes?: string;
+  feature_claims_tracking?: boolean;
+  feature_year_end_summary?: boolean;
+  feature_insurance_calculator?: boolean;
+  feature_bulk_operations?: boolean;
+  feature_intake_forms?: boolean;
+  feature_documents?: boolean;
+}
+
+export interface PractitionerUpdateInput {
+  name?: string;
+  workspace_name?: string;
+  status?: PractitionerStatus;
+  plan_type?: PractitionerPlanType;
+  practice_type?: PracticeType;
+  billing_status?: BillingStatus;
+  monthly_price?: number;
+  trial_ends_at?: string;
+  billing_started_at?: string;
+  billing_notes?: string;
+  feature_claims_tracking?: boolean;
+  feature_year_end_summary?: boolean;
+  feature_insurance_calculator?: boolean;
+  feature_bulk_operations?: boolean;
+  feature_intake_forms?: boolean;
+  feature_documents?: boolean;
 }

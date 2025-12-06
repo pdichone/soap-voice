@@ -208,7 +208,7 @@ export default function DocumentsPage() {
                   className="mt-1 w-full min-h-[200px] px-3 py-2 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Tip: You can use markdown formatting for headers, lists, etc.
+                  Use <code className="bg-gray-100 px-1 rounded">{'{{client_name}}'}</code> to insert the client&apos;s name and <code className="bg-gray-100 px-1 rounded">{'{{date}}'}</code> for the current date.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -322,7 +322,7 @@ export default function DocumentsPage() {
                 onClick={() => {
                   setTitle('Informed Consent for Massage Therapy');
                   setDocumentType('CONSENT');
-                  setContent(`I, the undersigned, hereby consent to receive massage therapy from the therapist named above.
+                  setContent(`I, {{client_name}}, hereby consent to receive massage therapy.
 
 I understand that massage therapy is intended to promote relaxation, reduce muscle tension, and improve circulation. I understand that massage therapy is not a substitute for medical treatment.
 
@@ -330,7 +330,7 @@ I have informed the therapist of all known physical conditions and medications, 
 
 I understand that I may stop the session at any time if I experience discomfort.
 
-By signing below, I acknowledge that I have read and understand this consent form.`);
+Date: {{date}}`);
                   setIsRequired(true);
                   setShowDialog(true);
                 }}
@@ -356,7 +356,9 @@ PAYMENT POLICY
 
 Payment is due at the time of service. We accept cash, credit cards, and HSA/FSA cards.
 
-By signing below, I acknowledge that I have read and understand these policies.`);
+I, {{client_name}}, acknowledge that I have read and understand these policies.
+
+Date: {{date}}`);
                   setIsRequired(true);
                   setShowDialog(true);
                 }}
@@ -373,6 +375,8 @@ By signing below, I acknowledge that I have read and understand these policies.`
                   setTitle('Health History Intake');
                   setDocumentType('INTAKE');
                   setContent(`HEALTH HISTORY QUESTIONNAIRE
+
+Client Name: {{client_name}}
 
 Please answer the following questions to help us provide the best care for you.
 
@@ -394,7 +398,9 @@ What is your preferred pressure level?
 - Firm
 - Deep
 
-By signing below, I confirm that the information provided is accurate to the best of my knowledge.`);
+I, {{client_name}}, confirm that the information provided is accurate to the best of my knowledge.
+
+Date: {{date}}`);
                   setIsRequired(true);
                   setShowDialog(true);
                 }}

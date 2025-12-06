@@ -189,7 +189,10 @@ export default function PublicConsentPage() {
 
             {/* Document Content */}
             <div className="prose prose-sm max-w-none mb-8">
-              {document?.content.split('\n').map((paragraph, idx) => (
+              {document?.content
+                .replace(/\{\{\s*client_name\s*\}\}/gi, patientName)
+                .replace(/\{\{\s*date\s*\}\}/gi, new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }))
+                .split('\n').map((paragraph, idx) => (
                 <p key={idx} className="mb-4 text-gray-700 leading-relaxed">
                   {paragraph}
                 </p>

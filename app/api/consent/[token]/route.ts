@@ -96,19 +96,42 @@ export async function POST(
   const userAgent = request.headers.get('user-agent') || 'unknown';
   const now = new Date().toISOString();
 
-  // Create or update the client_document record
-  const { error: docError } = await supabaseAdmin
+  // Check if a client_document record already exists for this combination
+  const { data: existingDoc } = await supabaseAdmin
     .from('client_documents')
-    .upsert({
-      owner_user_id: link.owner_user_id,
-      patient_id: link.patient_id,
-      template_id: link.template_id,
-      status: 'SIGNED',
-      signed_at: now,
-      signature_data: `Signed electronically via link. IP: ${ip}, User-Agent: ${userAgent}`,
-    }, {
-      onConflict: 'patient_id,template_id',
-    });
+    .select('id')
+    .eq('owner_user_id', link.owner_user_id)
+    .eq('patient_id', link.patient_id)
+    .eq('template_id', link.template_id)
+    .single();
+
+  let docError;
+
+  if (existingDoc) {
+    // Update existing record
+    const { error } = await supabaseAdmin
+      .from('client_documents')
+      .update({
+        status: 'SIGNED',
+        signed_at: now,
+        signature_data: `Signed electronically via link. IP: ${ip}, User-Agent: ${userAgent}`,
+      })
+      .eq('id', existingDoc.id);
+    docError = error;
+  } else {
+    // Insert new record
+    const { error } = await supabaseAdmin
+      .from('client_documents')
+      .insert({
+        owner_user_id: link.owner_user_id,
+        patient_id: link.patient_id,
+        template_id: link.template_id,
+        status: 'SIGNED',
+        signed_at: now,
+        signature_data: `Signed electronically via link. IP: ${ip}, User-Agent: ${userAgent}`,
+      });
+    docError = error;
+  }
 
   if (docError) {
     console.error('Error saving signature:', docError);

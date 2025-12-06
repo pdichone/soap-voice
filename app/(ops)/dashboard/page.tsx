@@ -14,6 +14,7 @@ import {
   getReferralAlerts,
   getOverdueClaimsCount,
   getPracticeConfig,
+  getAdminFeatureFlags,
 } from '@/lib/db/ops-queries';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -48,6 +49,7 @@ export default async function DashboardPage() {
   const [
     profile,
     practiceConfig,
+    adminFlags,
     summary,
     pendingClaims,
     todaysVisits,
@@ -61,6 +63,7 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     getProfile(),
     getPracticeConfig(),
+    getAdminFeatureFlags(),
     getDashboardSummary(),
     getPendingClaims(),
     getTodaysVisitsWithCollections(),
@@ -73,8 +76,11 @@ export default async function DashboardPage() {
     getOverdueClaimsCount(14), // 14 days threshold per reference
   ]);
 
-  const userName = profile?.full_name?.split(' ')[0] || 'there';
+  const userName = profile?.full_name || 'there';
   const { features } = practiceConfig;
+
+  // Claims are shown only if: practice type supports it AND admin has enabled the feature
+  const showClaims = features.showClaims && adminFlags.feature_claims_tracking;
   const totalReferralAlerts = features.showReferrals
     ? referralAlerts.critical.length + referralAlerts.warning.length
     : 0;
@@ -82,9 +88,9 @@ export default async function DashboardPage() {
   return (
     <div className="p-4 space-y-6 max-w-7xl mx-auto">
       {/* Header with Greeting and Action Buttons */}
-      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
+      <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-2xl font-bold text-gray-900 break-words">
             {getGreeting()}, {userName}
           </h1>
           <p className="text-gray-500 text-sm">
@@ -111,7 +117,7 @@ export default async function DashboardPage() {
       </header>
 
       {/* Top Summary Cards - dynamic based on practice type */}
-      <div className={`grid gap-3 ${features.showClaims ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-2 lg:grid-cols-3'}`}>
+      <div className={`grid gap-3 ${showClaims ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-2 lg:grid-cols-3'}`}>
         {/* Today's Visits/Sessions */}
         <Card>
           <CardHeader className="pb-2">
@@ -131,7 +137,7 @@ export default async function DashboardPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-              {features.showClaims ? "Today's Collections" : "Today's Payments"}
+              {showClaims ? "Today's Collections" : "Today's Payments"}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -143,7 +149,7 @@ export default async function DashboardPage() {
         </Card>
 
         {/* Pending Claims - only show for insurance practice */}
-        {features.showClaims && (
+        {showClaims && (
           <Card className={overdueClaimsCount > 0 ? 'border-red-200' : ''}>
             <CardHeader className="pb-2">
               <CardTitle className="text-xs font-medium text-gray-500 uppercase tracking-wide">
@@ -177,7 +183,7 @@ export default async function DashboardPage() {
         )}
 
         {/* Weekly Collected - show for cash_only instead of claims/referrals */}
-        {!features.showClaims && (
+        {!showClaims && (
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-xs font-medium text-gray-500 uppercase tracking-wide">
@@ -254,7 +260,7 @@ export default async function DashboardPage() {
           </Card>
 
           {/* Pending Claims Table - only for insurance practice */}
-          {features.showClaims && (
+          {showClaims && (
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
@@ -341,6 +347,7 @@ export default async function DashboardPage() {
                     {referralAlerts.critical.slice(0, 3).map(({ patient, referral, visitsUsed }) => {
                       const limit = referral.visit_limit_count || 0;
                       const percentage = limit > 0 ? Math.min((visitsUsed / limit) * 100, 100) : 0;
+                      const icd10Display = referral.icd10_codes?.slice(0, 2).join(', ') || '';
                       return (
                         <div key={referral.id} className="p-3 rounded-lg border border-red-200 bg-red-50/50">
                           <div className="flex items-start gap-3">
@@ -350,9 +357,14 @@ export default async function DashboardPage() {
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-gray-900">{patient?.display_name}</p>
                               <p className="text-xs text-gray-500">
-                                {patient?.insurer_name} • Expires {referral.referral_expiration_date
+                                {patient?.insurer_name}
+                                {referral.physician_name && ` • Dr. ${referral.physician_name}`}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                Expires {referral.referral_expiration_date
                                   ? formatDate(referral.referral_expiration_date, { month: 'short', day: 'numeric', year: 'numeric' })
                                   : 'N/A'}
+                                {icd10Display && ` • ${icd10Display}`}
                               </p>
                               {limit > 0 && (
                                 <>
@@ -375,6 +387,7 @@ export default async function DashboardPage() {
                     {referralAlerts.warning.slice(0, 3).map(({ patient, referral, visitsUsed }) => {
                       const limit = referral.visit_limit_count || 0;
                       const percentage = limit > 0 ? Math.min((visitsUsed / limit) * 100, 100) : 0;
+                      const icd10Display = referral.icd10_codes?.slice(0, 2).join(', ') || '';
                       return (
                         <div key={referral.id} className="p-3 rounded-lg border border-amber-200 bg-amber-50/50">
                           <div className="flex items-start gap-3">
@@ -384,9 +397,14 @@ export default async function DashboardPage() {
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-gray-900">{patient?.display_name}</p>
                               <p className="text-xs text-gray-500">
-                                {patient?.insurer_name} • Expires {referral.referral_expiration_date
+                                {patient?.insurer_name}
+                                {referral.physician_name && ` • Dr. ${referral.physician_name}`}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                Expires {referral.referral_expiration_date
                                   ? formatDate(referral.referral_expiration_date, { month: 'short', day: 'numeric', year: 'numeric' })
                                   : 'N/A'}
+                                {icd10Display && ` • ${icd10Display}`}
                               </p>
                               {limit > 0 && (
                                 <>
@@ -457,7 +475,7 @@ export default async function DashboardPage() {
               {/* This Week's Snapshot */}
               <div className="mt-6 pt-4 border-t border-gray-100">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">This Week&apos;s Snapshot</p>
-                <div className={`grid gap-3 ${features.showClaims ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                <div className={`grid gap-3 ${showClaims ? 'grid-cols-3' : 'grid-cols-2'}`}>
                   <div className="bg-gray-50 rounded-lg p-3 text-center">
                     <div className="text-xl font-bold text-gray-900">{summary.visits_this_week}</div>
                     <p className="text-xs text-gray-500">{features.visitLabelPlural}</p>
@@ -467,15 +485,15 @@ export default async function DashboardPage() {
                       ${(weeklyPayments.thisWeek + insuranceThisWeek).toLocaleString()}
                     </div>
                     <p className="text-xs text-gray-500">
-                      {features.showClaims && insuranceThisWeek > 0 ? 'Total Revenue' : 'Collected'}
+                      {showClaims && insuranceThisWeek > 0 ? 'Total Revenue' : 'Collected'}
                     </p>
-                    {features.showClaims && insuranceThisWeek > 0 && (
+                    {showClaims && insuranceThisWeek > 0 && (
                       <p className="text-xs text-blue-600 mt-0.5">
                         ${insuranceThisWeek.toLocaleString()} ins
                       </p>
                     )}
                   </div>
-                  {features.showClaims && (
+                  {showClaims && (
                     <div className="bg-gray-50 rounded-lg p-3 text-center">
                       <div className="text-xl font-bold text-gray-900">{claimsPaidThisWeek}</div>
                       <p className="text-xs text-gray-500">Claims Paid</p>
@@ -491,7 +509,7 @@ export default async function DashboardPage() {
       {/* Quick Actions */}
       <div className="space-y-3">
         <h2 className="text-base font-semibold text-gray-900">Quick Actions</h2>
-        <div className={`grid gap-3 ${features.showClaims ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2'}`}>
+        <div className={`grid gap-3 ${showClaims ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2'}`}>
           <Link
             href="/visits?action=new"
             className="flex flex-col items-center gap-2 p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all text-center"
@@ -502,7 +520,7 @@ export default async function DashboardPage() {
             <span className="text-sm font-medium text-gray-900">Add {features.visitLabel}</span>
           </Link>
 
-          {features.showClaims && (
+          {showClaims && (
             <Link
               href="/claims?action=new"
               className="flex flex-col items-center gap-2 p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all text-center"

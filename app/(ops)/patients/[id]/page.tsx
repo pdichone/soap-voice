@@ -11,22 +11,24 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getLocalDateString, formatDate, formatTimestamp } from '@/lib/date-utils';
+import { formatDate, formatTimestamp } from '@/lib/date-utils';
 import type { PatientNonPhi, VisitNonPhi, ClaimNonPhi, ReferralNonPhi, PaymentNonPhi, DocumentTemplate, ClientDocument, PatientBenefits } from '@/lib/types-ops';
 import type { IntakeForm, IntakeLink, IntakeResponse } from '@/lib/types-intake';
 import { ALL_PAYMENT_METHODS, usePracticeConfig } from '@/lib/practice-config';
+import { useFeatureFlags } from '@/lib/feature-flags';
 import { QuestionRenderer } from '@/components/intake/QuestionRenderer';
 import { BenefitsSection } from '@/components/ops/BenefitsSection';
+import { GenerateSummaryDialog } from '@/components/ops/GenerateSummaryDialog';
+import { EnhancedReferralForm } from '@/components/ops/EnhancedReferralForm';
+import {
+  PHYSICIAN_SPECIALTIES,
+  calculateReferralStatus,
+  getAlertLevelColor,
+} from '@/lib/referral-presets';
 
 interface DocumentWithStatus extends DocumentTemplate {
   clientDoc?: ClientDocument | null;
 }
-
-const VISIT_LIMIT_TYPES = [
-  { value: 'PER_REFERRAL', label: 'Per Referral' },
-  { value: 'PER_YEAR', label: 'Per Calendar Year' },
-  { value: 'UNLIMITED', label: 'Unlimited' },
-];
 
 export default function PatientDetailPage() {
   const params = useParams();
@@ -36,6 +38,12 @@ export default function PatientDetailPage() {
   // Get practice config for terminology
   const { practiceType } = usePracticeConfig();
   const isCashOnly = practiceType === 'cash_only';
+
+  // Get admin feature flags
+  const { flags: adminFlags } = useFeatureFlags();
+
+  // Claims shown only if: practice type supports it AND admin has enabled the feature
+  const showClaims = !isCashOnly && adminFlags.feature_claims_tracking;
 
   // Dynamic terminology
   const clientLabel = isCashOnly ? 'Client' : 'Patient';
@@ -84,17 +92,26 @@ export default function PatientDetailPage() {
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
   const [paymentIsCopay, setPaymentIsCopay] = useState(true);
+  const [showSummaryDialog, setShowSummaryDialog] = useState(false);
 
   // Referral form state
   const [showReferralDialog, setShowReferralDialog] = useState(false);
-  const [savingReferral, setSavingReferral] = useState(false);
   const [editingReferral, setEditingReferral] = useState<ReferralNonPhi | null>(null);
-  const [referralLabel, setReferralLabel] = useState('');
-  const [visitLimitType, setVisitLimitType] = useState('PER_REFERRAL');
-  const [visitLimitCount, setVisitLimitCount] = useState('');
-  const [referralStartDate, setReferralStartDate] = useState(getLocalDateString());
-  const [referralExpirationDate, setReferralExpirationDate] = useState('');
-  const [referralNotes, setReferralNotes] = useState('');
+
+  // Toast notification state
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Auto-clear toast after 2 seconds
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => setToastMessage(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+  };
 
   const loadData = useCallback(async () => {
     const supabase = createClient();
@@ -212,16 +229,6 @@ export default function PatientDetailPage() {
     loadData();
   }, [loadData]);
 
-  const resetReferralForm = () => {
-    setReferralLabel('');
-    setVisitLimitType('PER_REFERRAL');
-    setVisitLimitCount('');
-    setReferralStartDate(getLocalDateString());
-    setReferralExpirationDate('');
-    setReferralNotes('');
-    setEditingReferral(null);
-  };
-
   const resetPaymentForm = () => {
     setPaymentAmount(patient?.default_copay_amount?.toString() || '');
     setPaymentMethod('CASH');
@@ -255,74 +262,6 @@ export default function PatientDetailPage() {
       router.refresh();
     }
     setSavingPayment(false);
-  };
-
-  const openEditReferral = (referral: ReferralNonPhi) => {
-    setEditingReferral(referral);
-    setReferralLabel(referral.referral_label || '');
-    setVisitLimitType(referral.visit_limit_type || 'PER_REFERRAL');
-    setVisitLimitCount(referral.visit_limit_count?.toString() || '');
-    setReferralStartDate(referral.referral_start_date || '');
-    setReferralExpirationDate(referral.referral_expiration_date || '');
-    setReferralNotes(referral.notes || '');
-    setShowReferralDialog(true);
-  };
-
-  const handleSaveReferral = async () => {
-    setSavingReferral(true);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      alert('You must be logged in to save a referral');
-      setSavingReferral(false);
-      return;
-    }
-
-    // Ensure profile exists (needed for foreign key)
-    await supabase.from('profiles').upsert({ id: user.id }, { onConflict: 'id' });
-
-    const referralData = {
-      patient_id: id,
-      owner_user_id: user.id,
-      referral_label: referralLabel.trim() || null,
-      visit_limit_type: visitLimitType,
-      visit_limit_count: visitLimitType === 'UNLIMITED' ? null : (visitLimitCount ? parseInt(visitLimitCount) : null),
-      referral_start_date: referralStartDate || null,
-      referral_expiration_date: referralExpirationDate || null,
-      notes: referralNotes.trim() || null,
-    };
-
-    let error;
-
-    if (editingReferral) {
-      // Update existing referral - don't include owner_user_id in update
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { owner_user_id, patient_id, ...updateData } = referralData;
-      const result = await supabase
-        .from('referrals_non_phi')
-        .update(updateData)
-        .eq('id', editingReferral.id)
-        .eq('owner_user_id', user.id);
-      error = result.error;
-    } else {
-      // Insert new referral
-      const result = await supabase
-        .from('referrals_non_phi')
-        .insert(referralData);
-      error = result.error;
-    }
-
-    if (error) {
-      console.error('Error saving referral:', error);
-      alert(`Error saving referral: ${error.message}`);
-    } else {
-      setShowReferralDialog(false);
-      resetReferralForm();
-      loadData();
-      router.refresh();
-    }
-
-    setSavingReferral(false);
   };
 
   const getVisitsUsedForReferral = (referralId: string) => {
@@ -419,7 +358,7 @@ export default function PatientDetailPage() {
   const copyIntakeLink = (token: string) => {
     const url = `${window.location.origin}/intake/${token}`;
     navigator.clipboard.writeText(url);
-    alert('Link copied to clipboard!');
+    showToast('Copied to clipboard');
   };
 
   const handleSendConsentForm = async (doc: DocumentWithStatus) => {
@@ -442,20 +381,25 @@ export default function PatientDetailPage() {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
 
-    const { error } = await supabase.from('consent_links').insert({
+    const { data: newLink, error } = await supabase.from('consent_links').insert({
       token,
       template_id: doc.id,
       patient_id: id,
       owner_user_id: user.id,
       expires_at: expiresAt.toISOString(),
-    });
+    }).select().single();
 
     if (error) {
       console.error('Error creating consent link:', error);
       alert('Failed to create consent link');
-    } else {
+    } else if (newLink) {
+      // Immediately add the new link to state to prevent race conditions
+      setConsentLinks(prev => [newLink, ...prev]);
       setSendingConsentDoc(null);
-      loadData();
+      // Also copy the link immediately so user can share it
+      const url = `${window.location.origin}/consent/${token}`;
+      navigator.clipboard.writeText(url);
+      showToast('Link created and copied to clipboard');
       router.refresh();
     }
     setSendingConsentLink(false);
@@ -464,7 +408,7 @@ export default function PatientDetailPage() {
   const copyConsentLink = (token: string) => {
     const url = `${window.location.origin}/consent/${token}`;
     navigator.clipboard.writeText(url);
-    alert('Consent link copied to clipboard!');
+    showToast('Copied to clipboard');
   };
 
   const getConsentLinkForDoc = (templateId: string) => {
@@ -501,6 +445,15 @@ export default function PatientDetailPage() {
 
   return (
     <div className="p-4 space-y-4">
+      {/* Toast notification */}
+      {toastMessage && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium">
+            {toastMessage}
+          </div>
+        </div>
+      )}
+
       <header>
         <Link href="/patients" className="text-blue-600 text-sm font-medium flex items-center gap-1 mb-2">
           <ChevronLeftIcon className="w-4 h-4" />
@@ -566,15 +519,15 @@ export default function PatientDetailPage() {
       )}
 
       {/* Summary Cards */}
-      <div className={`grid gap-3 ${isCashOnly ? 'grid-cols-2' : 'grid-cols-3'}`}>
+      <div className={`grid gap-3 ${showClaims ? 'grid-cols-3' : 'grid-cols-2'}`}>
         <Card>
           <CardContent className="p-3 text-center">
             <div className="text-2xl font-bold">{visits.length}</div>
             <p className="text-xs text-gray-500">{visitLabelPlural}</p>
           </CardContent>
         </Card>
-        {/* Only show claims for insurance practices */}
-        {!isCashOnly && (
+        {/* Only show claims for insurance practices with claims tracking enabled */}
+        {showClaims && (
           <Card>
             <CardContent className="p-3 text-center">
               <div className="text-2xl font-bold">
@@ -599,25 +552,48 @@ export default function PatientDetailPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="visits" className="w-full">
-        <TabsList className={`grid w-full ${isCashOnly ? 'grid-cols-4' : 'grid-cols-7'}`}>
-          <TabsTrigger value="visits">{visitLabelPlural}</TabsTrigger>
-          {!isCashOnly && <TabsTrigger value="benefits">Benefits</TabsTrigger>}
-          {!isCashOnly && <TabsTrigger value="claims">Claims</TabsTrigger>}
-          {!isCashOnly && <TabsTrigger value="referrals">Referrals</TabsTrigger>}
-          <TabsTrigger value="payments">Payments</TabsTrigger>
-          <TabsTrigger value="intake" className="relative">
-            Intake
-            {intakeResponses.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full" />
+        {/* Scrollable tabs container - swipe on mobile, fits on larger screens */}
+        <div className="-mx-4 px-4 overflow-x-auto scrollbar-hide">
+          <TabsList className="inline-flex w-max gap-1 p-1 sm:w-full sm:flex sm:flex-wrap sm:justify-start">
+            <TabsTrigger value="visits" className="flex-shrink-0 px-4 py-2 text-sm whitespace-nowrap">
+              {visitLabelPlural}
+            </TabsTrigger>
+            {!isCashOnly && (
+              <TabsTrigger value="benefits" className="flex-shrink-0 px-4 py-2 text-sm whitespace-nowrap">
+                Benefits
+              </TabsTrigger>
             )}
-          </TabsTrigger>
-          <TabsTrigger value="documents" className="relative">
-            Docs
-            {documents.length > 0 && getDocumentStats().signed < documents.length && (
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full" />
+            {showClaims && (
+              <TabsTrigger value="claims" className="flex-shrink-0 px-4 py-2 text-sm whitespace-nowrap">
+                Claims
+              </TabsTrigger>
             )}
-          </TabsTrigger>
-        </TabsList>
+            {!isCashOnly && (
+              <TabsTrigger value="referrals" className="flex-shrink-0 px-4 py-2 text-sm whitespace-nowrap">
+                Referrals
+              </TabsTrigger>
+            )}
+            <TabsTrigger value="payments" className="flex-shrink-0 px-4 py-2 text-sm whitespace-nowrap">
+              Payments
+            </TabsTrigger>
+            {adminFlags.feature_intake_forms && (
+              <TabsTrigger value="intake" className="relative flex-shrink-0 px-4 py-2 text-sm whitespace-nowrap">
+                Intake
+                {intakeResponses.length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full" />
+                )}
+              </TabsTrigger>
+            )}
+            {adminFlags.feature_documents && (
+              <TabsTrigger value="documents" className="relative flex-shrink-0 px-4 py-2 text-sm whitespace-nowrap">
+                Docs
+                {documents.length > 0 && getDocumentStats().signed < documents.length && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full" />
+                )}
+              </TabsTrigger>
+            )}
+          </TabsList>
+        </div>
 
         <TabsContent value="visits" className="space-y-3 mt-4">
           <div className="flex justify-end">
@@ -676,196 +652,198 @@ export default function PatientDetailPage() {
           </TabsContent>
         )}
 
-        <TabsContent value="claims" className="space-y-3 mt-4">
-          <div className="flex justify-end">
-            <Button size="sm" onClick={() => router.push(`/claims?patientId=${id}&action=new`)}>
-              Add Claim
-            </Button>
-          </div>
-          {claims.length > 0 ? (
-            claims.map((claim) => (
-              <Card key={claim.id}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-gray-900">
-                        {claim.date_of_service
-                          ? formatDate(claim.date_of_service)
-                          : 'No date'}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {claim.insurer_name || 'No insurer'} - ${claim.billed_amount || 0}
-                      </p>
+        {showClaims && (
+          <TabsContent value="claims" className="space-y-3 mt-4">
+            <div className="flex justify-end">
+              <Button size="sm" onClick={() => router.push(`/claims?patientId=${id}&action=new`)}>
+                Add Claim
+              </Button>
+            </div>
+            {claims.length > 0 ? (
+              claims.map((claim) => (
+                <Card key={claim.id}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-gray-900">
+                          {claim.date_of_service
+                            ? formatDate(claim.date_of_service)
+                            : 'No date'}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {claim.insurer_name || 'No insurer'} - ${claim.billed_amount || 0}
+                        </p>
+                      </div>
+                      <ClaimStatusBadge status={claim.status} />
                     </div>
-                    <ClaimStatusBadge status={claim.status} />
-                  </div>
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <Card>
+                <CardContent className="py-8 text-center text-gray-500">
+                  No claims yet
                 </CardContent>
               </Card>
-            ))
-          ) : (
-            <Card>
-              <CardContent className="py-8 text-center text-gray-500">
-                No claims yet
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
+            )}
+          </TabsContent>
+        )}
 
         <TabsContent value="referrals" className="space-y-3 mt-4">
-          <div className="flex justify-end">
-            <Dialog open={showReferralDialog} onOpenChange={(open) => {
-              setShowReferralDialog(open);
-              if (!open) resetReferralForm();
-            }}>
+          {/* Enhanced Referral Dialog */}
+          <Dialog open={showReferralDialog} onOpenChange={(open) => {
+            setShowReferralDialog(open);
+            if (!open) setEditingReferral(null);
+          }}>
+            <div className="flex justify-end">
               <DialogTrigger asChild>
                 <Button size="sm">Add Referral</Button>
               </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>{editingReferral ? 'Edit Referral' : 'Add New Referral'}</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 pt-4">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">Referral Label</label>
-                    <Input
-                      value={referralLabel}
-                      onChange={(e) => setReferralLabel(e.target.value)}
-                      placeholder="e.g., Dr. Smith referral"
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">Visit Limit Type</label>
-                    <Select value={visitLimitType} onValueChange={setVisitLimitType}>
-                      <SelectTrigger className="mt-1">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {VISIT_LIMIT_TYPES.map((type) => (
-                          <SelectItem key={type.value} value={type.value}>
-                            {type.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {visitLimitType !== 'UNLIMITED' && (
-                    <div>
-                      <label className="text-sm font-medium text-gray-700">Visit Limit Count</label>
-                      <Input
-                        type="number"
-                        value={visitLimitCount}
-                        onChange={(e) => setVisitLimitCount(e.target.value)}
-                        placeholder="e.g., 12"
-                        className="mt-1"
-                        min="1"
-                      />
-                    </div>
-                  )}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm font-medium text-gray-700">Start Date</label>
-                      <Input
-                        type="date"
-                        value={referralStartDate}
-                        onChange={(e) => setReferralStartDate(e.target.value)}
-                        className="mt-1"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-gray-700">Expiration Date</label>
-                      <Input
-                        type="date"
-                        value={referralExpirationDate}
-                        onChange={(e) => setReferralExpirationDate(e.target.value)}
-                        className="mt-1"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">Notes (non-medical)</label>
-                    <textarea
-                      value={referralNotes}
-                      onChange={(e) => setReferralNotes(e.target.value)}
-                      placeholder="Any administrative notes..."
-                      className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      rows={3}
-                    />
-                  </div>
-                  <Button
-                    onClick={handleSaveReferral}
-                    disabled={savingReferral}
-                    className="w-full"
-                  >
-                    {savingReferral ? 'Saving...' : (editingReferral ? 'Update Referral' : 'Add Referral')}
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-          </div>
+            </div>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>{editingReferral ? 'Edit Referral' : 'Add New Referral'}</DialogTitle>
+              </DialogHeader>
+              <EnhancedReferralForm
+                patient={patient}
+                referral={editingReferral}
+                onSave={() => {
+                  setShowReferralDialog(false);
+                  setEditingReferral(null);
+                  loadData();
+                  router.refresh();
+                }}
+                onCancel={() => {
+                  setShowReferralDialog(false);
+                  setEditingReferral(null);
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+
           {referrals.length > 0 ? (
             referrals.map((referral) => {
               const visitsUsed = getVisitsUsedForReferral(referral.id);
-              const isExpired = referral.referral_expiration_date && new Date(referral.referral_expiration_date) < new Date();
-              const isNearLimit = referral.visit_limit_count && visitsUsed >= referral.visit_limit_count * 0.8;
+              const statusInfo = calculateReferralStatus(referral, visitsUsed);
+              const alertColors = getAlertLevelColor(statusInfo.alertLevel);
+              const specialtyLabel = PHYSICIAN_SPECIALTIES.find(s => s.value === referral.physician_specialty)?.label || referral.physician_specialty;
 
               return (
-                <Card key={referral.id} className={isExpired ? 'opacity-60' : ''}>
+                <Card key={referral.id} className={`${statusInfo.status === 'expired' || statusInfo.status === 'exhausted' ? 'opacity-70' : ''} border-l-4 ${alertColors.border}`}>
                   <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="font-medium text-gray-900">
-                          {referral.referral_label || 'Referral'}
-                        </p>
-                        <p className="text-sm text-gray-500 mt-1">
-                          {referral.visit_limit_type === 'UNLIMITED'
-                            ? 'Unlimited visits'
-                            : `${visitsUsed} / ${referral.visit_limit_count || '?'} visits used`}
-                        </p>
-                        {referral.referral_start_date && (
-                          <p className="text-xs text-gray-400 mt-1">
-                            Started {formatDate(referral.referral_start_date)}
-                            {referral.referral_expiration_date && (
-                              <> - Expires {formatDate(referral.referral_expiration_date)}</>
-                            )}
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        {/* Header with physician name */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-semibold text-gray-900">
+                            {referral.physician_name || referral.referral_label || 'Referral'}
                           </p>
-                        )}
-                        {/* Progress bar */}
-                        {referral.visit_limit_count && (
-                          <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
-                            <div
-                              className={`h-2 rounded-full transition-all ${
-                                isNearLimit ? 'bg-yellow-500' : 'bg-green-500'
-                              }`}
-                              style={{
-                                width: `${Math.min(100, (visitsUsed / referral.visit_limit_count) * 100)}%`
-                              }}
-                            />
+                          {specialtyLabel && (
+                            <Badge variant="outline" className="text-xs bg-gray-50">
+                              {specialtyLabel}
+                            </Badge>
+                          )}
+                        </div>
+
+                        {/* Payer and auth info */}
+                        <div className="flex items-center gap-3 mt-1 text-sm text-gray-600">
+                          {referral.payer && <span>{referral.payer}</span>}
+                          {referral.authorization_number && (
+                            <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">
+                              Auth: {referral.authorization_number}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Visit tracking */}
+                        <div className="mt-2">
+                          <p className="text-sm text-gray-600">
+                            {referral.visit_limit_type === 'UNLIMITED'
+                              ? 'Unlimited visits'
+                              : `${visitsUsed} / ${referral.visit_limit_count || '?'} visits used`}
+                          </p>
+                          {referral.visit_limit_count && (
+                            <div className="mt-1 w-full bg-gray-200 rounded-full h-2">
+                              <div
+                                className={`h-2 rounded-full transition-all ${
+                                  statusInfo.status === 'exhausted' ? 'bg-red-500' :
+                                  statusInfo.status === 'visits_low' ? 'bg-yellow-500' : 'bg-green-500'
+                                }`}
+                                style={{ width: `${Math.min(100, statusInfo.percentUsed)}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Dates */}
+                        <p className="text-xs text-gray-400 mt-2">
+                          {referral.referral_start_date && `Started ${formatDate(referral.referral_start_date)}`}
+                          {referral.referral_expiration_date && ` - Expires ${formatDate(referral.referral_expiration_date)}`}
+                        </p>
+
+                        {/* ICD-10 and CPT codes */}
+                        {(referral.icd10_codes?.length || referral.cpt_codes?.length) ? (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {referral.icd10_codes?.map((code) => (
+                              <Badge key={code} variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200">
+                                {code}
+                              </Badge>
+                            ))}
+                            {referral.cpt_codes?.map((code) => (
+                              <Badge key={code} variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                                {code}
+                              </Badge>
+                            ))}
                           </div>
-                        )}
+                        ) : null}
+
                         {referral.notes && (
                           <p className="text-xs text-gray-500 mt-2 italic">{referral.notes}</p>
                         )}
                       </div>
+
+                      {/* Status and actions */}
                       <div className="flex flex-col items-end gap-2">
-                        <Badge
-                          variant="outline"
-                          className={
-                            isExpired
-                              ? 'bg-red-100 text-red-800'
-                              : 'bg-green-100 text-green-800'
-                          }
-                        >
-                          {isExpired ? 'Expired' : 'Active'}
+                        <Badge variant="outline" className={`${alertColors.bg} ${alertColors.text}`}>
+                          {statusInfo.message}
                         </Badge>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-xs"
-                          onClick={() => openEditReferral(referral)}
-                        >
-                          Edit
-                        </Button>
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-xs h-7 px-2"
+                            onClick={() => {
+                              setEditingReferral(referral);
+                              setShowReferralDialog(true);
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          {(statusInfo.status === 'expired' || statusInfo.status === 'exhausted' || statusInfo.status === 'visits_low') && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-xs h-7 px-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+                              onClick={() => {
+                                // Create a new referral pre-filled with the old one's data (but clear id and dates for a new referral)
+                                const renewedReferral: ReferralNonPhi = {
+                                  ...referral,
+                                  id: '', // Will be ignored when creating new
+                                  status: 'active',
+                                  referral_start_date: null,
+                                  referral_expiration_date: null,
+                                  created_at: '',
+                                  updated_at: '',
+                                };
+                                setEditingReferral(renewedReferral);
+                                setShowReferralDialog(true);
+                              }}
+                            >
+                              <RefreshIcon className="w-3 h-3 mr-1" />
+                              Renew
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </CardContent>
@@ -875,7 +853,9 @@ export default function PatientDetailPage() {
           ) : (
             <Card>
               <CardContent className="py-8 text-center text-gray-500">
-                <p className="mb-4">No referrals on file</p>
+                <ReferralIcon className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                <p className="mb-2">No referrals on file</p>
+                <p className="text-sm mb-4">Add a referral to track visits, authorization, and physician info</p>
                 <Button onClick={() => setShowReferralDialog(true)}>Add First Referral</Button>
               </CardContent>
             </Card>
@@ -889,13 +869,18 @@ export default function PatientDetailPage() {
                 Total: ${payments.reduce((sum, p) => sum + (p.amount || 0), 0).toFixed(2)}
               </p>
             </div>
-            <Dialog open={showPaymentDialog} onOpenChange={(open) => {
-              setShowPaymentDialog(open);
-              if (open) resetPaymentForm();
-            }}>
-              <DialogTrigger asChild>
-                <Button size="sm">Log Payment</Button>
-              </DialogTrigger>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => setShowSummaryDialog(true)} className="border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800">
+                <FileTextIcon className="w-4 h-4 mr-1" />
+                Year-End Statement
+              </Button>
+              <Dialog open={showPaymentDialog} onOpenChange={(open) => {
+                setShowPaymentDialog(open);
+                if (open) resetPaymentForm();
+              }}>
+                <DialogTrigger asChild>
+                  <Button size="sm">Log Payment</Button>
+                </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Log Payment</DialogTitle>
@@ -951,7 +936,17 @@ export default function PatientDetailPage() {
                 </div>
               </DialogContent>
             </Dialog>
+            </div>
           </div>
+
+          {/* Year-End Statement Dialog */}
+          <GenerateSummaryDialog
+            open={showSummaryDialog}
+            onOpenChange={setShowSummaryDialog}
+            patientId={id}
+            patientName={patient.display_name}
+          />
+
           {payments.length > 0 ? (
             payments.map((payment) => (
               <Card key={payment.id}>
@@ -994,6 +989,7 @@ export default function PatientDetailPage() {
           )}
         </TabsContent>
 
+        {adminFlags.feature_intake_forms && (
         <TabsContent value="intake" className="space-y-3 mt-4">
           <div className="flex justify-end">
             <Dialog open={showSendIntakeDialog} onOpenChange={setShowSendIntakeDialog}>
@@ -1137,7 +1133,9 @@ export default function PatientDetailPage() {
             </Card>
           ) : null}
         </TabsContent>
+        )}
 
+        {adminFlags.feature_documents && (
         <TabsContent value="documents" className="space-y-3 mt-4">
           {documents.length > 0 ? (
             <>
@@ -1311,6 +1309,7 @@ export default function PatientDetailPage() {
             </Card>
           )}
         </TabsContent>
+        )}
       </Tabs>
     </div>
   );
@@ -1386,6 +1385,30 @@ function SendIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+    </svg>
+  );
+}
+
+function FileTextIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+  );
+}
+
+function RefreshIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+  );
+}
+
+function ReferralIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
     </svg>
   );
 }

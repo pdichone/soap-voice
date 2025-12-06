@@ -18,6 +18,8 @@ import type {
   PaymentExport,
   PaymentMethodBreakdown,
   PatientBenefits,
+  Portal,
+  PortalWithClaimCount,
 } from '@/lib/types-ops';
 import { getCollectAmount } from '@/lib/benefits-calculator';
 
@@ -189,6 +191,48 @@ export async function getPracticeConfig(): Promise<PracticeConfig> {
     practice,
     practiceType,
     features: PRACTICE_FEATURES[practiceType],
+  };
+}
+
+// =============================================
+// ADMIN FEATURE FLAGS (Server-side)
+// =============================================
+
+export interface AdminFeatureFlags {
+  feature_claims_tracking: boolean;
+  feature_year_end_summary: boolean;
+}
+
+const DEFAULT_ADMIN_FLAGS: AdminFeatureFlags = {
+  feature_claims_tracking: true,
+  feature_year_end_summary: true,
+};
+
+/**
+ * Fetch feature flags for the current user from the practitioners table.
+ * These are controlled by super admins.
+ */
+export async function getAdminFeatureFlags(): Promise<AdminFeatureFlags> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) return DEFAULT_ADMIN_FLAGS;
+
+  // Fetch from practitioners table where user_id matches
+  const { data: practitioner, error } = await supabase
+    .from('practitioners')
+    .select('feature_claims_tracking, feature_year_end_summary')
+    .eq('user_id', user.id)
+    .single();
+
+  if (error || !practitioner) {
+    // No practitioner record found, return defaults (allow all features)
+    return DEFAULT_ADMIN_FLAGS;
+  }
+
+  return {
+    feature_claims_tracking: practitioner.feature_claims_tracking ?? true,
+    feature_year_end_summary: practitioner.feature_year_end_summary ?? true,
   };
 }
 
@@ -1561,4 +1605,200 @@ export async function getPaymentsForExport(options?: { startDate?: string; endDa
     method: p.method,
     isCopay: p.is_copay,
   }));
+}
+
+// =============================================
+// PORTAL QUERIES
+// =============================================
+
+export async function getPortals(activeOnly = true): Promise<Portal[]> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  // Get user's practice_id
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('practice_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile?.practice_id) return [];
+
+  let query = supabase
+    .from('portals')
+    .select('*')
+    .eq('practice_id', profile.practice_id)
+    .order('sort_order', { ascending: true });
+
+  if (activeOnly) {
+    query = query.eq('is_active', true);
+  }
+
+  const { data } = await query;
+  return data || [];
+}
+
+export async function getPortalsWithClaimCount(): Promise<PortalWithClaimCount[]> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  // Get user's practice_id
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('practice_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile?.practice_id) return [];
+
+  // Get all portals
+  const { data: portals } = await supabase
+    .from('portals')
+    .select('*')
+    .eq('practice_id', profile.practice_id)
+    .order('sort_order', { ascending: true });
+
+  if (!portals) return [];
+
+  // Get claim counts for each portal
+  const portalsWithCounts: PortalWithClaimCount[] = await Promise.all(
+    portals.map(async (portal) => {
+      const { count } = await supabase
+        .from('claims_non_phi')
+        .select('*', { count: 'exact', head: true })
+        .eq('owner_user_id', user.id)
+        .eq('portal_name', portal.name);
+
+      return {
+        ...portal,
+        claim_count: count || 0,
+      };
+    })
+  );
+
+  return portalsWithCounts;
+}
+
+export async function getPortal(id: string): Promise<Portal | null> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  // Get user's practice_id
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('practice_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile?.practice_id) return null;
+
+  const { data } = await supabase
+    .from('portals')
+    .select('*')
+    .eq('id', id)
+    .eq('practice_id', profile.practice_id)
+    .single();
+
+  return data;
+}
+
+export async function createPortal(portal: Omit<Portal, 'id' | 'practice_id' | 'created_at' | 'updated_at'>): Promise<Portal | null> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  // Get user's practice_id
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('practice_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile?.practice_id) return null;
+
+  const { data } = await supabase
+    .from('portals')
+    .insert({ ...portal, practice_id: profile.practice_id })
+    .select()
+    .single();
+
+  return data;
+}
+
+export async function updatePortal(id: string, updates: Partial<Omit<Portal, 'id' | 'practice_id' | 'created_at' | 'updated_at'>>): Promise<Portal | null> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  // Get user's practice_id
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('practice_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile?.practice_id) return null;
+
+  const { data } = await supabase
+    .from('portals')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('practice_id', profile.practice_id)
+    .select()
+    .single();
+
+  return data;
+}
+
+export async function deletePortal(id: string): Promise<boolean> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  // Get user's practice_id
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('practice_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile?.practice_id) return false;
+
+  const { error } = await supabase
+    .from('portals')
+    .delete()
+    .eq('id', id)
+    .eq('practice_id', profile.practice_id);
+
+  return !error;
+}
+
+export async function updatePortalSortOrder(portals: { id: string; sort_order: number }[]): Promise<boolean> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+
+  // Get user's practice_id
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('practice_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile?.practice_id) return false;
+
+  // Update each portal's sort order
+  const updates = portals.map(({ id, sort_order }) =>
+    supabase
+      .from('portals')
+      .update({ sort_order, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('practice_id', profile.practice_id)
+  );
+
+  const results = await Promise.all(updates);
+  return results.every(r => !r.error);
 }

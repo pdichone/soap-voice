@@ -10,7 +10,8 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getLocalDateString, formatDate } from '@/lib/date-utils';
-import type { PatientNonPhi, VisitNonPhi, PatientBenefits, CollectionResult } from '@/lib/types-ops';
+import type { PatientNonPhi, VisitNonPhi, PatientBenefits, CollectionResult, ReferralNonPhi } from '@/lib/types-ops';
+import { formatDate as formatDateShort } from '@/lib/date-utils';
 import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
 import { ALL_PAYMENT_METHODS, usePracticeConfig } from '@/lib/practice-config';
 import { getCollectAmount } from '@/lib/benefits-calculator';
@@ -22,6 +23,14 @@ interface VisitWithPatient extends VisitNonPhi {
 interface PatientWithReferral extends PatientNonPhi {
   activeReferralId?: string | null;
   benefits?: PatientBenefits | null;
+}
+
+// Referral with computed visit usage info
+interface ReferralWithUsage extends ReferralNonPhi {
+  visitsUsed: number;
+  visitsRemaining: number | null; // null = unlimited
+  isExpired: boolean;
+  isExhausted: boolean;
 }
 
 function VisitsContent() {
@@ -45,8 +54,12 @@ function VisitsContent() {
   const [showDialog, setShowDialog] = useState(showNewForm);
   const [saving, setSaving] = useState(false);
 
+  // Referral state
+  const [allReferrals, setAllReferrals] = useState<ReferralWithUsage[]>([]);
+
   // Form state for visit
   const [selectedPatientId, setSelectedPatientId] = useState(preselectedPatientId || '');
+  const [selectedReferralId, setSelectedReferralId] = useState<string>('');
   const [visitDate, setVisitDate] = useState(getLocalDateString());
   const [isBillable, setIsBillable] = useState(true);
 
@@ -104,21 +117,105 @@ function VisitsContent() {
         .eq('owner_user_id', user.id),
     ]);
 
-    setVisits(visitsResult.data || []);
+    const allVisits = visitsResult.data || [];
+    setVisits(allVisits);
 
-    // Associate each patient with their active referral and benefits
+    // Compute visit counts per referral
+    const visitCountByReferral: Record<string, number> = {};
+    allVisits.forEach(v => {
+      if (v.referral_id) {
+        visitCountByReferral[v.referral_id] = (visitCountByReferral[v.referral_id] || 0) + 1;
+      }
+    });
+
+    // Process referrals with usage info
+    const referralsWithUsage: ReferralWithUsage[] = (referralsResult.data || []).map(ref => {
+      const visitsUsed = visitCountByReferral[ref.id] || 0;
+      const isUnlimited = ref.visit_limit_type === 'UNLIMITED';
+      const visitsRemaining = isUnlimited ? null : (ref.visit_limit_count || 0) - visitsUsed;
+      const isExpired = ref.referral_expiration_date
+        ? new Date(ref.referral_expiration_date) < new Date(today)
+        : false;
+      const isExhausted = !isUnlimited && visitsRemaining !== null && visitsRemaining <= 0;
+
+      return {
+        ...ref,
+        visitsUsed,
+        visitsRemaining,
+        isExpired,
+        isExhausted,
+      };
+    });
+
+    setAllReferrals(referralsWithUsage);
+
+    // Associate each patient with their "best" active referral (oldest usable) and benefits
     const patientsWithReferrals = (patientsResult.data || []).map(patient => {
-      const activeReferral = (referralsResult.data || []).find(r => r.patient_id === patient.id);
+      // Find best referral: oldest non-expired, non-exhausted referral for this patient
+      const patientReferrals = referralsWithUsage
+        .filter(r => r.patient_id === patient.id && !r.isExpired && !r.isExhausted)
+        .sort((a, b) => {
+          // Sort by start date ascending (oldest first = FIFO)
+          const dateA = a.referral_start_date ? new Date(a.referral_start_date).getTime() : 0;
+          const dateB = b.referral_start_date ? new Date(b.referral_start_date).getTime() : 0;
+          return dateA - dateB;
+        });
+
+      const bestReferral = patientReferrals[0] || null;
       const patientBenefits = (benefitsResult.data || []).find(b => b.patient_id === patient.id);
+
       return {
         ...patient,
-        activeReferralId: activeReferral?.id || null,
+        activeReferralId: bestReferral?.id || null,
         benefits: patientBenefits || null,
       };
     });
 
     setPatients(patientsWithReferrals);
     setLoading(false);
+  };
+
+  // Get referrals for the selected patient (for the dropdown)
+  const getPatientReferrals = (patientId: string): ReferralWithUsage[] => {
+    return allReferrals
+      .filter(r => r.patient_id === patientId)
+      .sort((a, b) => {
+        // Put usable referrals first, then sort by start date (oldest first)
+        const aUsable = !a.isExpired && !a.isExhausted ? 0 : 1;
+        const bUsable = !b.isExpired && !b.isExhausted ? 0 : 1;
+        if (aUsable !== bUsable) return aUsable - bUsable;
+
+        const dateA = a.referral_start_date ? new Date(a.referral_start_date).getTime() : 0;
+        const dateB = b.referral_start_date ? new Date(b.referral_start_date).getTime() : 0;
+        return dateA - dateB;
+      });
+  };
+
+  // Get the "best" referral for a patient (oldest usable)
+  const getBestReferralForPatient = (patientId: string): ReferralWithUsage | null => {
+    const patientReferrals = getPatientReferrals(patientId);
+    return patientReferrals.find(r => !r.isExpired && !r.isExhausted) || null;
+  };
+
+  // Format referral display label
+  const formatReferralLabel = (ref: ReferralWithUsage): string => {
+    const label = ref.physician_name || ref.referral_label || 'Referral';
+    const visits = ref.visit_limit_type === 'UNLIMITED'
+      ? '∞ visits'
+      : `${ref.visitsUsed}/${ref.visit_limit_count} used`;
+    const expiry = ref.referral_expiration_date
+      ? ` · exp ${formatDateShort(ref.referral_expiration_date)}`
+      : '';
+    const status = ref.isExpired ? ' [EXPIRED]' : ref.isExhausted ? ' [EXHAUSTED]' : '';
+    return `${label} (${visits}${expiry})${status}`;
+  };
+
+  // Handle patient selection - auto-select best referral
+  const handlePatientChange = (patientId: string) => {
+    setSelectedPatientId(patientId);
+    // Auto-select the best referral for this patient
+    const bestReferral = getBestReferralForPatient(patientId);
+    setSelectedReferralId(bestReferral?.id || '');
   };
 
   const handleAddVisit = async () => {
@@ -129,13 +226,18 @@ function VisitsContent() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Find the selected patient to get their active referral
+    // Find the selected patient
     const patient = patients.find(p => p.id === selectedPatientId);
+
+    // Use the explicitly selected referral (or null if none/"no-referral" selected)
+    const referralIdToUse = selectedReferralId && selectedReferralId !== 'no-referral'
+      ? selectedReferralId
+      : null;
 
     const { data: visitData, error } = await supabase.from('visits_non_phi').insert({
       owner_user_id: user.id,
       patient_id: selectedPatientId,
-      referral_id: patient?.activeReferralId || null,
+      referral_id: referralIdToUse,
       visit_date: visitDate,
       is_billable_to_insurance: isBillable,
     }).select().single();
@@ -163,6 +265,7 @@ function VisitsContent() {
 
       // Reset visit form
       setSelectedPatientId('');
+      setSelectedReferralId('');
       setVisitDate(getLocalDateString());
       setIsBillable(true);
 
@@ -241,7 +344,7 @@ function VisitsContent() {
             <div className="space-y-4 pt-4">
               <div>
                 <label className="text-sm font-medium text-gray-700">{clientLabel} *</label>
-                <Select value={selectedPatientId} onValueChange={setSelectedPatientId}>
+                <Select value={selectedPatientId} onValueChange={handlePatientChange}>
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder={`Select ${clientLabel.toLowerCase()}`} />
                   </SelectTrigger>
@@ -254,6 +357,48 @@ function VisitsContent() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Referral dropdown - only for insurance practices when patient has referrals */}
+              {!isCashOnly && selectedPatientId && getPatientReferrals(selectedPatientId).length > 0 && (
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Referral</label>
+                  <Select value={selectedReferralId} onValueChange={setSelectedReferralId}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Select referral (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="no-referral">
+                        <span className="text-gray-500">No referral (self-pay)</span>
+                      </SelectItem>
+                      {getPatientReferrals(selectedPatientId).map((ref) => (
+                        <SelectItem
+                          key={ref.id}
+                          value={ref.id}
+                          disabled={ref.isExpired || ref.isExhausted}
+                        >
+                          <span className={ref.isExpired || ref.isExhausted ? 'text-gray-400' : ''}>
+                            {formatReferralLabel(ref)}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedReferralId && selectedReferralId !== 'no-referral' && (() => {
+                    const selectedRef = allReferrals.find(r => r.id === selectedReferralId);
+                    if (selectedRef && !selectedRef.isExpired && !selectedRef.isExhausted) {
+                      return (
+                        <p className="text-xs text-green-600 mt-1">
+                          {selectedRef.visit_limit_type === 'UNLIMITED'
+                            ? 'Unlimited visits available'
+                            : `${selectedRef.visitsRemaining} visits remaining`}
+                        </p>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              )}
+
               <div>
                 <label className="text-sm font-medium text-gray-700">{visitLabel} Date *</label>
                 <Input

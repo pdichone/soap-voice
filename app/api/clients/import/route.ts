@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { deidentifyName } from '@/lib/name-utils';
 
 interface CSVClient {
   name?: string;
@@ -87,7 +88,8 @@ function normalizeClient(csv: CSVClient): NormalizedClient | null {
   const noteParts = [csv.notes, csv.comments, csv.preferences].filter(Boolean);
   const notes = noteParts.length > 0 ? noteParts.join('\n') : null;
 
-  return { name: name.trim(), phone, email, notes };
+  // De-identify the name for privacy (e.g., "Paulo Dichone" -> "Paulo D.")
+  return { name: deidentifyName(name.trim()), phone, email, notes };
 }
 
 export async function POST(request: Request) {

@@ -11,25 +11,25 @@ const supabaseAdmin = createClient(
 
 // Demo patient data - realistic massage therapy scenarios
 // Only include columns that exist in the patients_non_phi table
-// Names are marked with "(Demo)" to clearly identify test data
+// Names are de-identified (First L. format) and marked with "(Demo)" to clearly identify test data
 const DEMO_PATIENTS = [
   {
-    display_name: 'Sarah Johnson (Demo)',
+    display_name: 'Sarah J. (Demo)',
     default_copay_amount: 25,
     is_active: true,
   },
   {
-    display_name: 'Michael Chen (Demo)',
+    display_name: 'Michael C. (Demo)',
     default_copay_amount: 30,
     is_active: true,
   },
   {
-    display_name: 'Emily Rodriguez (Demo)',
+    display_name: 'Emily R. (Demo)',
     default_copay_amount: 20,
     is_active: true,
   },
   {
-    display_name: 'James Wilson (Demo)',
+    display_name: 'James W. (Demo)',
     default_copay_amount: 25,
     is_active: true,
   },

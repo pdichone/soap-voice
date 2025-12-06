@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import type { PatientWithStats } from '@/lib/types-ops';
 import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
 import { usePracticeConfig } from '@/lib/practice-config';
+import { deidentifyName } from '@/lib/name-utils';
 
 function PatientsContent() {
   const router = useRouter();
@@ -111,7 +112,7 @@ function PatientsContent() {
 
     const { error } = await supabase.from('patients_non_phi').insert({
       owner_user_id: user.id,
-      display_name: displayName.trim(),
+      display_name: deidentifyName(displayName.trim()),
       insurer_name: insurerName.trim() || null,
       default_copay_amount: copayAmount ? parseFloat(copayAmount) : null,
     });
@@ -168,10 +169,17 @@ function PatientsContent() {
                 <Input
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="e.g., John D. or Patient #123"
+                  placeholder="e.g., Paulo Dichone"
                   className="mt-1"
                 />
-                <p className="text-xs text-gray-500 mt-1">Use an alias - no real names for privacy</p>
+                {displayName.trim() && displayName.trim().includes(' ') && (
+                  <p className="text-xs text-blue-600 mt-1">
+                    Will be saved as: <strong>{deidentifyName(displayName.trim())}</strong>
+                  </p>
+                )}
+                <p className="text-xs text-gray-500 mt-1">
+                  Names are auto-abbreviated for privacy (e.g., Paulo Dichone → Paulo D.)
+                </p>
               </div>
               {/* Only show insurance field for insurance practices */}
               {!isCashOnly && (

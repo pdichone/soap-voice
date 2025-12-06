@@ -16,13 +16,13 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: 'BodyWorkFlow',
+  title: 'ZenLeef',
   description: 'Practice management for massage therapists and bodyworkers',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'BodyWorkFlow',
+    title: 'ZenLeef',
   },
 };
 

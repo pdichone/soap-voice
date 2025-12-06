@@ -30,8 +30,11 @@ export function AdminNav({ admin }: AdminNavProps) {
           {/* Logo and Brand */}
           <div className="flex items-center">
             <Link href="/admin" className="flex items-center space-x-2">
-              <span className="text-xl font-bold text-blue-400">BWF</span>
-              <span className="text-sm text-slate-400">Super Admin</span>
+              <span className="text-xl font-bold">
+                <span className="text-emerald-400">Zen</span>
+                <span className="text-amber-400">Leef</span>
+              </span>
+              <span className="text-sm text-slate-400">Admin</span>
             </Link>
           </div>
 

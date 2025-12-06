@@ -90,12 +90,11 @@ export function Onboarding() {
       {/* Header */}
       <div className="pt-12 pb-8 px-4 text-center">
         <div className="flex justify-center mb-4">
-          <Image src="/logo-icon.svg" alt="BodyWorkFlow" width={64} height={64} />
+          <Image src="/logo-icon.svg" alt="ZenLeef" width={64} height={64} />
         </div>
         <h1 className="text-2xl font-bold text-gray-900 mb-2">
-          Welcome to <span className="text-primary">Body</span>
-          <span className="text-foreground">Work</span>
-          <span className="text-accent">Flow</span>
+          Welcome to <span className="text-primary">Zen</span>
+          <span className="text-accent">Leef</span>
         </h1>
         <p className="text-gray-600 max-w-md mx-auto">
           Let&apos;s set up your practice. Choose the option that best describes how you work.

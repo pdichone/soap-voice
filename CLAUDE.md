@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**BodyWorkFlow** is a practice management PWA for Licensed Massage Therapists (LMTs). It has two main modules:
+**ZenLeef** is a practice management PWA for Licensed Massage Therapists (LMTs). It has two main modules:
 
 1. **Clinical Module** - Voice-to-SOAP notes using Deepgram transcription + Claude AI
 2. **Ops Module** - Practice management: patients, visits, claims, referrals, payments, reports

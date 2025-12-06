@@ -62,7 +62,7 @@ export default function AdminLoginPage() {
               />
             </svg>
           </div>
-          <CardTitle className="text-2xl">BodyWorkFlow Admin</CardTitle>
+          <CardTitle className="text-2xl">ZenLeef Admin</CardTitle>
           <CardDescription>
             Sign in to access the Super Admin portal
           </CardDescription>

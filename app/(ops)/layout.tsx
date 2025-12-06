@@ -16,11 +16,10 @@ export default function OpsLayout({
         <header className="sticky top-0 z-30 bg-white border-b border-border">
           <div className="flex items-center justify-between px-4 h-14">
             <Link href="/dashboard" className="flex items-center gap-2">
-              <Image src="/logo-icon.svg" alt="BodyWorkFlow" width={32} height={32} />
+              <Image src="/logo-icon.svg" alt="ZenLeef" width={32} height={32} />
               <span className="font-heading font-bold text-lg">
-                <span className="text-primary">Body</span>
-                <span className="text-foreground">Work</span>
-                <span className="text-accent">Flow</span>
+                <span className="text-primary">Zen</span>
+                <span className="text-accent">Leef</span>
               </span>
             </Link>
             <Link

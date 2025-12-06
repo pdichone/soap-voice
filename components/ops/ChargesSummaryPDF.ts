@@ -213,7 +213,7 @@ export async function generateChargesSummaryPDF(data: ChargesSummaryData): Promi
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(140, 140, 140);
   doc.text(`Generated on ${data.generated_at}`, margin, footerY);
-  doc.text('BodyWorkFlow', pageWidth - margin - 20, footerY);
+  doc.text('ZenLeef', pageWidth - margin - 20, footerY);
 
   // Generate filename
   const safeName = data.patient.display_name.replace(/[^a-zA-Z0-9]/g, '-');

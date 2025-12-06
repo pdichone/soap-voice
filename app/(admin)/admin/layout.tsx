@@ -3,8 +3,8 @@ import { getAdminUser } from '@/lib/admin-auth';
 import { AdminNav } from '@/components/admin/AdminNav';
 
 export const metadata = {
-  title: 'BodyWorkFlow Admin',
-  description: 'Super Admin Portal for BodyWorkFlow',
+  title: 'ZenLeef Admin',
+  description: 'Super Admin Portal for ZenLeef',
 };
 
 export default async function AdminLayout({

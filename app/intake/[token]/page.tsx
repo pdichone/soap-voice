@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,11 +21,7 @@ export default function PublicIntakeFormPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  useEffect(() => {
-    loadForm();
-  }, [token]);
-
-  const loadForm = async () => {
+  const loadForm = useCallback(async () => {
     try {
       const res = await fetch(`/api/intake/${token}`);
       const data = await res.json();
@@ -53,7 +49,11 @@ export default function PublicIntakeFormPage() {
       setErrorMessage('Failed to load form');
       setState('error');
     }
-  };
+  }, [token]);
+
+  useEffect(() => {
+    loadForm();
+  }, [loadForm]);
 
   const validateForm = (): boolean => {
     if (!form) return false;

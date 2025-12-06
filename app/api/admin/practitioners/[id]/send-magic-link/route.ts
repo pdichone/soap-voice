@@ -39,7 +39,7 @@ export async function POST(
 
     // Use Supabase Admin to send magic link
     // inviteUserByEmail creates the user AND sends the email
-    const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+    const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       practitioner.email,
       {
         redirectTo: `${siteUrl}/auth/confirm`,

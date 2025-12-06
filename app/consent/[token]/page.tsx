@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,11 +25,7 @@ export default function PublicConsentPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  useEffect(() => {
-    loadDocument();
-  }, [token]);
-
-  const loadDocument = async () => {
+  const loadDocument = useCallback(async () => {
     try {
       const res = await fetch(`/api/consent/${token}`);
       const data = await res.json();
@@ -57,7 +53,11 @@ export default function PublicConsentPage() {
       setErrorMessage('Failed to load document');
       setState('error');
     }
-  };
+  }, [token]);
+
+  useEffect(() => {
+    loadDocument();
+  }, [loadDocument]);
 
   const handleSign = async () => {
     setSubmitting(true);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -69,14 +69,7 @@ export function GenerateBusinessStatementDialog({
     }
   }, [open, generatedPDF?.url]);
 
-  useEffect(() => {
-    if (open && dialogState === 'select') {
-      loadPreviewData();
-      loadPracticeSettings();
-    }
-  }, [open, selectedYear, dialogState]);
-
-  const loadPracticeSettings = async () => {
+  const loadPracticeSettings = useCallback(async () => {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -98,9 +91,9 @@ export function GenerateBusinessStatementDialog({
         setPracticeSettings(practice.settings as PracticeSettings);
       }
     }
-  };
+  }, []);
 
-  const loadPreviewData = async () => {
+  const loadPreviewData = useCallback(async () => {
     setLoading(true);
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -131,7 +124,14 @@ export function GenerateBusinessStatementDialog({
       setPreviewData({ totalRevenue: 0, totalVisits: 0, totalClients: 0 });
     }
     setLoading(false);
-  };
+  }, [selectedYear]);
+
+  useEffect(() => {
+    if (open && dialogState === 'select') {
+      loadPreviewData();
+      loadPracticeSettings();
+    }
+  }, [open, selectedYear, dialogState, loadPreviewData, loadPracticeSettings]);
 
   const handleGenerate = async () => {
     setDialogState('generating');

@@ -18,6 +18,7 @@ function PatientsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const showNewForm = searchParams.get('action') === 'new';
+  const justArchived = searchParams.get('archived') === 'success';
 
   // Get practice config for terminology
   const { practiceType } = usePracticeConfig();
@@ -26,10 +27,16 @@ function PatientsContent() {
   const clientLabelPlural = isCashOnly ? 'Clients' : 'Patients';
 
   const [patients, setPatients] = useState<PatientWithStats[]>([]);
+  const [archivedPatients, setArchivedPatients] = useState<PatientWithStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showDialog, setShowDialog] = useState(showNewForm);
   const [saving, setSaving] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+
+  // Toast state
+  const [toastMessage, setToastMessage] = useState<string | null>(justArchived ? `${clientLabel} archived successfully` : null);
 
   // Demo data state
   const [demoPatientCount, setDemoPatientCount] = useState(0);
@@ -41,6 +48,20 @@ function PatientsContent() {
   const [displayName, setDisplayName] = useState('');
   const [insurerName, setInsurerName] = useState('');
   const [copayAmount, setCopayAmount] = useState('');
+
+  // Auto-clear toast and URL param
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => setToastMessage(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
+  useEffect(() => {
+    if (justArchived) {
+      router.replace('/patients');
+    }
+  }, [justArchived, router]);
 
   useEffect(() => {
     loadPatients();
@@ -59,20 +80,57 @@ function PatientsContent() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data } = await supabase
-      .from('patients_non_phi')
-      .select('*')
-      .eq('owner_user_id', user.id)
-      .eq('is_active', true)
-      .order('display_name');
+    // Load active and archived patients in parallel
+    const [activeResult, archivedResult] = await Promise.all([
+      supabase
+        .from('patients_non_phi')
+        .select('*')
+        .eq('owner_user_id', user.id)
+        .eq('is_active', true)
+        .order('display_name'),
+      supabase
+        .from('patients_non_phi')
+        .select('*')
+        .eq('owner_user_id', user.id)
+        .eq('is_active', false)
+        .order('display_name'),
+    ]);
 
-    if (data) {
-      setPatients(data);
+    if (activeResult.data) {
+      setPatients(activeResult.data);
       // Count demo patients (those with "(Demo)" in name)
-      const demoCount = data.filter(p => p.display_name.includes('(Demo)')).length;
+      const demoCount = activeResult.data.filter(p => p.display_name.includes('(Demo)')).length;
       setDemoPatientCount(demoCount);
     }
+    if (archivedResult.data) {
+      setArchivedPatients(archivedResult.data);
+    }
     setLoading(false);
+  };
+
+  const handleRestorePatient = async (patientId: string) => {
+    setRestoringId(patientId);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setRestoringId(null);
+      return;
+    }
+
+    const { error } = await supabase
+      .from('patients_non_phi')
+      .update({ is_active: true })
+      .eq('id', patientId)
+      .eq('owner_user_id', user.id);
+
+    if (!error) {
+      setToastMessage(`${clientLabel} restored successfully`);
+      loadPatients();
+      router.refresh();
+    } else {
+      setToastMessage('Failed to restore');
+    }
+    setRestoringId(null);
   };
 
   const handleDeleteDemoData = async () => {
@@ -138,10 +196,21 @@ function PatientsContent() {
 
   return (
     <div className="p-4 space-y-4">
+      {/* Toast notification */}
+      {toastMessage && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium">
+            {toastMessage}
+          </div>
+        </div>
+      )}
+
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{clientLabelPlural}</h1>
-          <p className="text-gray-500 text-sm">{patients.length} active {clientLabelPlural.toLowerCase()}</p>
+          <p className="text-gray-500 text-sm">
+            {patients.length} active{archivedPatients.length > 0 && ` · ${archivedPatients.length} archived`}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {/* Delete Demo Data button - only shown when demo patients exist */}
@@ -169,7 +238,7 @@ function PatientsContent() {
                 <Input
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="e.g., Paulo Dichone"
+                  placeholder="e.g., John Doe"
                   className="mt-1"
                 />
                 {displayName.trim() && displayName.trim().includes(' ') && (
@@ -178,7 +247,7 @@ function PatientsContent() {
                   </p>
                 )}
                 <p className="text-xs text-gray-500 mt-1">
-                  Names are auto-abbreviated for privacy (e.g., Paulo Dichone → Paulo D.)
+                  Names are auto-abbreviated for privacy (e.g., John Doe → John D.)
                 </p>
               </div>
               {/* Only show insurance field for insurance practices */}
@@ -218,16 +287,31 @@ function PatientsContent() {
         </div>
       </header>
 
-      {/* Search */}
-      {patients.length > 0 && (
-        <div className="relative">
-          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={`Search ${clientLabelPlural.toLowerCase()}...`}
-            className="pl-9"
-          />
+      {/* Search and Filter */}
+      {(patients.length > 0 || archivedPatients.length > 0) && (
+        <div className="space-y-3">
+          <div className="relative">
+            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={`Search ${clientLabelPlural.toLowerCase()}...`}
+              className="pl-9"
+            />
+          </div>
+          {archivedPatients.length > 0 && (
+            <button
+              onClick={() => setShowArchived(!showArchived)}
+              className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full transition-colors ${
+                showArchived
+                  ? 'bg-gray-200 text-gray-700'
+                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+              }`}
+            >
+              <ArchiveIcon className="w-4 h-4" />
+              {showArchived ? 'Hide' : 'Show'} Archived ({archivedPatients.length})
+            </button>
+          )}
         </div>
       )}
 
@@ -262,11 +346,44 @@ function PatientsContent() {
           ))}
         </div>
       ) : patients.length === 0 ? (
-        <Card>
+        <Card className="border-dashed border-2 border-gray-200 bg-gray-50/50">
           <CardContent className="py-12 text-center">
-            <UsersIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500 mb-4">No {clientLabelPlural.toLowerCase()} yet</p>
-            <Button onClick={() => setShowDialog(true)}>Add Your First {clientLabel}</Button>
+            <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+              <UsersIcon className="w-8 h-8 text-primary" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Welcome to ZenLeef!</h3>
+            <p className="text-gray-600 mb-6 max-w-sm mx-auto">
+              Start by adding your first {clientLabel.toLowerCase()}. You can add them one by one or import from a CSV file.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
+              <Button onClick={() => setShowDialog(true)}>
+                <PlusIcon className="w-4 h-4 mr-2" />
+                Add {clientLabel}
+              </Button>
+            </div>
+            <div className="mt-8 pt-6 border-t border-gray-200">
+              <p className="text-xs text-gray-500 mb-3">Quick tip: Here&apos;s how ZenLeef works</p>
+              <div className="flex justify-center gap-8 text-center">
+                <div className="flex flex-col items-center">
+                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mb-2">
+                    <span className="text-blue-600 font-semibold text-sm">1</span>
+                  </div>
+                  <span className="text-xs text-gray-600">Add {clientLabelPlural}</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mb-2">
+                    <span className="text-blue-600 font-semibold text-sm">2</span>
+                  </div>
+                  <span className="text-xs text-gray-600">Log {isCashOnly ? 'Sessions' : 'Visits'}</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mb-2">
+                    <span className="text-blue-600 font-semibold text-sm">3</span>
+                  </div>
+                  <span className="text-xs text-gray-600">Collect Payment</span>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       ) : (
@@ -275,6 +392,47 @@ function PatientsContent() {
             <p className="text-gray-500">No {clientLabelPlural.toLowerCase()} match &quot;{searchQuery}&quot;</p>
           </CardContent>
         </Card>
+      )}
+
+      {/* Archived Patients Section */}
+      {showArchived && archivedPatients.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium text-gray-500 flex items-center gap-2">
+            <ArchiveIcon className="w-4 h-4" />
+            Archived {clientLabelPlural}
+          </h3>
+          {archivedPatients.map((patient) => (
+            <Card key={patient.id} className="bg-gray-50 border-gray-200 opacity-75">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-medium text-gray-600">{patient.display_name}</h3>
+                    {patient.insurer_name && (
+                      <p className="text-sm text-gray-400">{patient.insurer_name}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs bg-gray-100 text-gray-500">
+                      Archived
+                    </Badge>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleRestorePatient(patient.id);
+                      }}
+                      disabled={restoringId === patient.id}
+                      className="text-xs"
+                    >
+                      {restoringId === patient.id ? 'Restoring...' : 'Restore'}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       )}
 
       {/* Delete Demo Data Confirmation Dialog */}
@@ -369,6 +527,22 @@ function TrashIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+  );
+}
+
+function PlusIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+    </svg>
+  );
+}
+
+function ArchiveIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
     </svg>
   );
 }

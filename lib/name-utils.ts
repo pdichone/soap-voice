@@ -9,7 +9,7 @@
  * De-identifies a name by abbreviating the last name
  *
  * @example
- * deidentifyName("Paulo Dichone") → "Paulo D."
+ * deidentifyName("John Doe") → "John D."
  * deidentifyName("Mary Jane Watson") → "Mary Jane W."
  * deidentifyName("John") → "John" (single name kept as-is)
  * deidentifyName("Sarah J.") → "Sarah J." (already abbreviated)

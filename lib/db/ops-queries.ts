@@ -388,6 +388,56 @@ export async function getPatient(id: string): Promise<PatientWithStats | null> {
   };
 }
 
+interface RecentPatient {
+  id: string;
+  display_name: string;
+  insurer_name: string | null;
+  last_visit_date: string;
+}
+
+/**
+ * Get patients with recent visit activity, sorted by most recent visit first
+ */
+export async function getRecentPatients(limit = 5): Promise<RecentPatient[]> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  // Get the most recent visits with patient info
+  const { data: recentVisits } = await supabase
+    .from('visits_non_phi')
+    .select(`
+      visit_date,
+      patient:patients_non_phi!inner(id, display_name, insurer_name, is_active)
+    `)
+    .eq('owner_user_id', user.id)
+    .order('visit_date', { ascending: false })
+    .limit(50); // Get more to dedupe
+
+  if (!recentVisits) return [];
+
+  // Dedupe by patient, keeping only the most recent visit for each
+  const seenPatients = new Set<string>();
+  const recentPatients: RecentPatient[] = [];
+
+  for (const visit of recentVisits) {
+    const patient = visit.patient as unknown as { id: string; display_name: string; insurer_name: string | null; is_active: boolean };
+    if (!patient || seenPatients.has(patient.id) || !patient.is_active) continue;
+
+    seenPatients.add(patient.id);
+    recentPatients.push({
+      id: patient.id,
+      display_name: patient.display_name,
+      insurer_name: patient.insurer_name,
+      last_visit_date: visit.visit_date,
+    });
+
+    if (recentPatients.length >= limit) break;
+  }
+
+  return recentPatients;
+}
+
 export async function createPatient(patient: Omit<PatientNonPhi, 'id' | 'owner_user_id' | 'created_at' | 'updated_at'>): Promise<PatientNonPhi | null> {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();

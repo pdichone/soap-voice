@@ -98,6 +98,10 @@ export default function PatientDetailPage() {
   const [showReferralDialog, setShowReferralDialog] = useState(false);
   const [editingReferral, setEditingReferral] = useState<ReferralNonPhi | null>(null);
 
+  // Archive state
+  const [showArchiveDialog, setShowArchiveDialog] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+
   // Toast notification state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -111,6 +115,29 @@ export default function PatientDetailPage() {
 
   const showToast = (message: string) => {
     setToastMessage(message);
+  };
+
+  const handleArchivePatient = async () => {
+    setArchiving(true);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setArchiving(false);
+      return;
+    }
+
+    const { error } = await supabase
+      .from('patients_non_phi')
+      .update({ is_active: false })
+      .eq('id', id)
+      .eq('owner_user_id', user.id);
+
+    if (!error) {
+      router.push('/patients?archived=success');
+    } else {
+      showToast('Failed to archive');
+      setArchiving(false);
+    }
   };
 
   const loadData = useCallback(async () => {
@@ -467,11 +494,51 @@ export default function PatientDetailPage() {
               <p className="text-gray-500">{patient.insurer_name}</p>
             )}
           </div>
-          {patient.default_copay_amount && (
-            <Badge variant="outline" className="text-sm">
-              {isCashOnly ? 'Rate' : 'Collect'}: ${patient.default_copay_amount}
-            </Badge>
-          )}
+          <div className="flex items-center gap-2">
+            {patient.default_copay_amount && (
+              <Badge variant="outline" className="text-sm">
+                {isCashOnly ? 'Rate' : 'Collect'}: ${patient.default_copay_amount}
+              </Badge>
+            )}
+            {/* Archive button */}
+            <Dialog open={showArchiveDialog} onOpenChange={setShowArchiveDialog}>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="sm" className="text-gray-400 hover:text-gray-600">
+                  <ArchiveIcon className="w-4 h-4" />
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Archive {clientLabel}</DialogTitle>
+                </DialogHeader>
+                <div className="py-4 space-y-4">
+                  <p className="text-gray-600">
+                    Are you sure you want to archive <strong>{patient.display_name}</strong>?
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Archived {clientLabel.toLowerCase()}s won&apos;t appear in your active list, but all their {visitLabelPlural.toLowerCase()}, payments, and documents will be preserved. You can restore them anytime.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowArchiveDialog(false)}
+                      className="flex-1"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={handleArchivePatient}
+                      disabled={archiving}
+                      className="flex-1"
+                    >
+                      {archiving ? 'Archiving...' : 'Archive'}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
       </header>
 
@@ -1409,6 +1476,14 @@ function ReferralIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+    </svg>
+  );
+}
+
+function ArchiveIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
     </svg>
   );
 }

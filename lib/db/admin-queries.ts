@@ -17,6 +17,7 @@ import type {
   PractitionerPlanType,
   BillingStatus,
 } from '@/lib/types-ops';
+import type { OnboardingQuestionnaire, OnboardingUpdateInput, OnboardingStatus } from '@/lib/types-onboarding';
 
 // =============================================
 // PRACTITIONERS
@@ -26,6 +27,7 @@ export async function getAllPractitioners(filters?: {
   status?: PractitionerStatus;
   planType?: PractitionerPlanType;
   billingStatus?: BillingStatus;
+  onboardingStatus?: OnboardingStatus;
   search?: string;
 }): Promise<PractitionerWithStats[]> {
   await requireAdmin();
@@ -48,6 +50,15 @@ export async function getAllPractitioners(filters?: {
 
   if (filters?.billingStatus) {
     query = query.eq('billing_status', filters.billingStatus);
+  }
+
+  if (filters?.onboardingStatus) {
+    if (filters.onboardingStatus === 'not_started') {
+      // Handle null as 'not_started'
+      query = query.or('onboarding_status.is.null,onboarding_status.eq.not_started');
+    } else {
+      query = query.eq('onboarding_status', filters.onboardingStatus);
+    }
   }
 
   if (filters?.search) {
@@ -488,4 +499,58 @@ export async function sendMagicLink(
   });
 
   return { success: true };
+}
+
+// =============================================
+// ONBOARDING
+// =============================================
+
+export async function getQuestionnaireByPractitionerId(
+  practitionerId: string
+): Promise<OnboardingQuestionnaire | null> {
+  await requireAdmin();
+
+  const supabase = createServiceRoleClient();
+
+  const { data, error } = await supabase
+    .from('onboarding_questionnaires')
+    .select('*')
+    .eq('practitioner_id', practitionerId)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') {
+      return null;
+    }
+    console.error('Error fetching questionnaire:', error);
+    throw new Error('Failed to fetch questionnaire');
+  }
+
+  return data as OnboardingQuestionnaire;
+}
+
+export async function updatePractitionerOnboarding(
+  practitionerId: string,
+  input: OnboardingUpdateInput
+): Promise<void> {
+  await requireAdmin();
+
+  const supabase = createServiceRoleClient();
+
+  const { error } = await supabase
+    .from('practitioners')
+    .update({
+      onboarding_status: input.onboarding_status,
+      onboarding_notes: input.onboarding_notes,
+      onboarding_started_at: input.onboarding_started_at,
+      onboarding_completed_at: input.onboarding_completed_at,
+      onboarding_checklist: input.onboarding_checklist,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', practitionerId);
+
+  if (error) {
+    console.error('Error updating practitioner onboarding:', error);
+    throw new Error('Failed to update practitioner onboarding');
+  }
 }

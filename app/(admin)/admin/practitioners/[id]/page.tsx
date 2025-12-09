@@ -3,14 +3,16 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { getPractitionerById, getRecentActivityForPractitioner } from '@/lib/db/admin-queries';
+import { getPractitionerById, getRecentActivityForPractitioner, getQuestionnaireByPractitionerId } from '@/lib/db/admin-queries';
 import { FeatureFlagsCard } from '@/components/admin/feature-flags-card';
 import { PracticeTypeCard } from '@/components/admin/practice-type-card';
 import { SendMagicLinkButton } from '@/components/admin/send-magic-link-button';
 import { SeedDemoDataButton } from '@/components/admin/seed-demo-data-button';
 import { DeleteDemoDataButton } from '@/components/admin/delete-demo-data-button';
 import { ImpersonateButton } from '@/components/admin/impersonate-button';
+import { OnboardingSectionWrapper } from '@/components/admin/OnboardingSectionWrapper';
 import type { PracticeType } from '@/lib/types-ops';
+import type { OnboardingStatus, OnboardingChecklist } from '@/lib/types-onboarding';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -38,14 +40,30 @@ function formatCurrency(amount: number | null) {
 export default async function PractitionerDetailPage({ params }: Props) {
   const { id } = await params;
 
-  const [practitioner, activity] = await Promise.all([
+  const [practitioner, activity, questionnaire] = await Promise.all([
     getPractitionerById(id),
     getRecentActivityForPractitioner(id, 10),
+    getQuestionnaireByPractitionerId(id),
   ]);
 
   if (!practitioner) {
     notFound();
   }
+
+  // Default onboarding values if not set
+  const onboardingStatus = (practitioner.onboarding_status || 'not_started') as OnboardingStatus;
+  const defaultChecklist: OnboardingChecklist = {
+    questionnaire_sent: false,
+    questionnaire_received: false,
+    practice_configured: false,
+    services_added: false,
+    intake_form_created: false,
+    client_list_imported: false,
+    welcome_email_sent: false,
+  };
+  const onboardingChecklist: OnboardingChecklist = practitioner.onboarding_checklist
+    ? (practitioner.onboarding_checklist as unknown as OnboardingChecklist)
+    : defaultChecklist;
 
   // Only show feature flags that are actually implemented
   const featureFlags = [
@@ -225,6 +243,18 @@ export default async function PractitionerDetailPage({ params }: Props) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Onboarding */}
+      <OnboardingSectionWrapper
+        practitionerId={practitioner.id}
+        practitionerName={practitioner.name}
+        onboardingStatus={onboardingStatus}
+        onboardingNotes={practitioner.onboarding_notes || null}
+        onboardingStartedAt={practitioner.onboarding_started_at || null}
+        onboardingCompletedAt={practitioner.onboarding_completed_at || null}
+        onboardingChecklist={onboardingChecklist}
+        questionnaire={questionnaire}
+      />
 
       {/* Practice Type */}
       <PracticeTypeCard

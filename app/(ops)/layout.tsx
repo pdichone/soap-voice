@@ -1,6 +1,7 @@
 import { OpsNav } from '@/components/ops/OpsNav';
 import { OpsProviders } from '@/components/ops/OpsProviders';
 import { InstallPrompt } from '@/components/InstallPrompt';
+import { FloatingActionButton } from '@/components/ops/FloatingActionButton';
 import Link from 'next/link';
 import Image from 'next/image';
 
@@ -32,6 +33,7 @@ export default function OpsLayout({
         </header>
 
         <main className="pt-safe">{children}</main>
+        <FloatingActionButton />
         <OpsNav />
         <InstallPrompt />
       </div>

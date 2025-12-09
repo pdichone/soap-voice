@@ -1,10 +1,14 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { getAllPractitioners } from '@/lib/db/admin-queries';
 import { ImpersonateButton } from '@/components/admin/impersonate-button';
+import { OnboardingStatusFilter } from '@/components/admin/onboarding-status-filter';
+import { ONBOARDING_STATUS_CONFIG } from '@/lib/onboarding-constants';
 import type { PractitionerWithStats } from '@/lib/types-ops';
+import type { OnboardingStatus } from '@/lib/types-onboarding';
 
 function getStatusBadgeVariant(status: string) {
   switch (status) {
@@ -62,12 +66,21 @@ function formatRelativeTime(date: string | null) {
   return formatDate(date);
 }
 
-export default async function PractitionersPage() {
+interface Props {
+  searchParams: Promise<{ onboarding?: string }>;
+}
+
+export default async function PractitionersPage({ searchParams }: Props) {
+  const params = await searchParams;
+  const onboardingFilter = params.onboarding as OnboardingStatus | undefined;
+
   let practitioners: PractitionerWithStats[] = [];
   let error: string | null = null;
 
   try {
-    practitioners = await getAllPractitioners();
+    practitioners = await getAllPractitioners({
+      onboardingStatus: onboardingFilter,
+    });
   } catch (err) {
     console.error('Error loading practitioners:', err);
     error = 'Failed to load practitioners';
@@ -83,24 +96,29 @@ export default async function PractitionersPage() {
             Manage LMT accounts and their features
           </p>
         </div>
-        <Link href="/admin/practitioners/new">
-          <Button>
-            <svg
-              className="w-4 h-4 mr-2"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-              />
-            </svg>
-            Add Practitioner
-          </Button>
-        </Link>
+        <div className="flex items-center gap-4">
+          <Suspense fallback={<div className="h-8 w-40 bg-slate-100 rounded animate-pulse" />}>
+            <OnboardingStatusFilter />
+          </Suspense>
+          <Link href="/admin/practitioners/new">
+            <Button>
+              <svg
+                className="w-4 h-4 mr-2"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                />
+              </svg>
+              Add Practitioner
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Error State */}
@@ -170,7 +188,22 @@ export default async function PractitionersPage() {
                   <tr key={p.id} className="hover:bg-slate-50">
                     <td className="py-4 px-4">
                       <div>
-                        <div className="font-medium text-slate-900">{p.name}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-slate-900">{p.name}</span>
+                          {(() => {
+                            const status = (p.onboarding_status || 'not_started') as OnboardingStatus;
+                            const config = ONBOARDING_STATUS_CONFIG[status];
+                            return (
+                              <Badge
+                                variant={config.badgeVariant}
+                                className="text-xs"
+                                title={config.label}
+                              >
+                                {config.label}
+                              </Badge>
+                            );
+                          })()}
+                        </div>
                         <div className="text-sm text-slate-500">{p.email}</div>
                         {p.workspace_name && (
                           <div className="text-xs text-slate-400">{p.workspace_name}</div>

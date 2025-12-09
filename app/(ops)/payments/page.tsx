@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { PatientNonPhi, PaymentNonPhi } from '@/lib/types-ops';
 import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
 import { ALL_PAYMENT_METHODS } from '@/lib/practice-config';
+import { useToast } from '@/lib/toast-context';
+import { DateFilterPills, isTimestampInRange } from '@/components/ops/DateFilterPills';
 
 interface PaymentWithPatient extends PaymentNonPhi {
   patient?: PatientNonPhi;
@@ -21,6 +23,7 @@ function PaymentsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const showNewForm = searchParams.get('action') === 'new';
+  const { showToast } = useToast();
 
   const [payments, setPayments] = useState<PaymentWithPatient[]>([]);
   const [patients, setPatients] = useState<PatientNonPhi[]>([]);
@@ -34,8 +37,8 @@ function PaymentsContent() {
   const [method, setMethod] = useState('CASH');
   const [isCopay, setIsCopay] = useState(false);
 
-  // Summary
-  const [monthlyTotal, setMonthlyTotal] = useState(0);
+  // Date filter state
+  const [dateFilter, setDateFilter] = useState('all');
 
   useEffect(() => {
     loadData();
@@ -72,17 +75,6 @@ function PaymentsContent() {
 
     const paymentsData = paymentsResult.data || [];
     setPayments(paymentsData);
-
-    // Calculate monthly total
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-
-    const monthPayments = paymentsData.filter(
-      (p) => new Date(p.created_at) >= startOfMonth
-    );
-    setMonthlyTotal(monthPayments.reduce((sum, p) => sum + p.amount, 0));
-
     setPatients(patientsResult.data || []);
     setLoading(false);
   };
@@ -109,15 +101,19 @@ function PaymentsContent() {
       setAmount('');
       setMethod('CASH');
       setIsCopay(false);
+      showToast(`Payment of $${parseFloat(amount).toFixed(2)} recorded`);
       loadData();
       router.refresh();
       router.replace('/payments');
+    } else {
+      showToast('Failed to save payment', 'error');
     }
     setSaving(false);
   };
 
-  // Group payments by date
-  const groupedPayments = payments.reduce((acc, payment) => {
+  // Filter and group payments by date
+  const filteredPayments = payments.filter(payment => isTimestampInRange(payment.created_at, dateFilter));
+  const groupedPayments = filteredPayments.reduce((acc, payment) => {
     const date = new Date(payment.created_at).toLocaleDateString();
     if (!acc[date]) acc[date] = [];
     acc[date].push(payment);
@@ -129,7 +125,11 @@ function PaymentsContent() {
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Payments</h1>
-          <p className="text-gray-500 text-sm">Track patient payments</p>
+          <p className="text-gray-500 text-sm">
+            {dateFilter === 'all'
+              ? `${payments.length} total payments`
+              : `${filteredPayments.length} of ${payments.length} payments`}
+          </p>
         </div>
         <Dialog open={showDialog} onOpenChange={setShowDialog}>
           <DialogTrigger asChild>
@@ -204,22 +204,24 @@ function PaymentsContent() {
         </Dialog>
       </header>
 
-      {/* Monthly Summary */}
+      {/* Date Filter Pills */}
+      {payments.length > 0 && (
+        <DateFilterPills value={dateFilter} onChange={setDateFilter} />
+      )}
+
+      {/* Summary - changes based on filter */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-gray-500">This Month</CardTitle>
+          <CardTitle className="text-sm font-medium text-gray-500">
+            {dateFilter === 'all' ? 'All Time' : dateFilter === 'today' ? 'Today' : dateFilter === 'week' ? 'This Week' : 'This Month'}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="text-3xl font-bold text-green-600">
-            ${monthlyTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ${filteredPayments.reduce((sum, p) => sum + p.amount, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <p className="text-sm text-gray-500">
-            {payments.filter(p => {
-              const start = new Date();
-              start.setDate(1);
-              start.setHours(0, 0, 0, 0);
-              return new Date(p.created_at) >= start;
-            }).length} payments
+            {filteredPayments.length} {filteredPayments.length === 1 ? 'payment' : 'payments'}
           </p>
         </CardContent>
       </Card>
@@ -269,11 +271,34 @@ function PaymentsContent() {
           ))}
         </div>
       ) : (
-        <Card>
+        <Card className="border-dashed border-2 border-gray-200 bg-gray-50/50">
           <CardContent className="py-12 text-center">
-            <DollarIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500 mb-4">No payments recorded yet</p>
-            <Button onClick={() => setShowDialog(true)}>Log Your First Payment</Button>
+            <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <DollarIcon className="w-8 h-8 text-emerald-600" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Track Your Earnings</h3>
+            {patients.length === 0 ? (
+              <>
+                <p className="text-gray-600 mb-6 max-w-sm mx-auto">
+                  Add a patient first, then come back here to log payments after each session.
+                </p>
+                <Button variant="outline" onClick={() => router.push('/patients?action=new')}>
+                  Add Your First Patient
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-600 mb-6 max-w-sm mx-auto">
+                  Payments are automatically logged when you add a visit. You can also log standalone payments here.
+                </p>
+                <Button onClick={() => setShowDialog(true)}>
+                  Log Payment
+                </Button>
+              </>
+            )}
+            <p className="text-xs text-gray-500 mt-6">
+              Tip: Add a visit from the Visits tab - you&apos;ll be prompted to collect payment automatically
+            </p>
           </CardContent>
         </Card>
       )}

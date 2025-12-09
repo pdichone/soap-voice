@@ -15,6 +15,8 @@ import { formatDate as formatDateShort } from '@/lib/date-utils';
 import { LoadingSpinner, PageLoading } from '@/components/ui/loading-spinner';
 import { ALL_PAYMENT_METHODS, usePracticeConfig } from '@/lib/practice-config';
 import { getCollectAmount } from '@/lib/benefits-calculator';
+import { useToast } from '@/lib/toast-context';
+import { DateFilterPills, isDateInRange } from '@/components/ops/DateFilterPills';
 
 interface VisitWithPatient extends VisitNonPhi {
   patient?: PatientNonPhi;
@@ -38,6 +40,7 @@ function VisitsContent() {
   const searchParams = useSearchParams();
   const showNewForm = searchParams.get('action') === 'new';
   const preselectedPatientId = searchParams.get('patientId');
+  const { showToast } = useToast();
 
   // Get practice config for terminology
   const { practiceType } = usePracticeConfig();
@@ -72,6 +75,9 @@ function VisitsContent() {
   const [savingPayment, setSavingPayment] = useState(false);
   const [collectionResult, setCollectionResult] = useState<CollectionResult | null>(null);
 
+  // Date filter state
+  const [dateFilter, setDateFilter] = useState('all');
+
   useEffect(() => {
     loadData();
     // Refresh data when page becomes visible (user navigates back)
@@ -83,6 +89,31 @@ function VisitsContent() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
+
+  // React to URL parameter changes (e.g., from FAB navigation)
+  useEffect(() => {
+    const action = searchParams.get('action');
+    const patientIdParam = searchParams.get('patientId');
+
+    if (action === 'new') {
+      // If navigating with a patientId, preselect that patient
+      if (patientIdParam && patientIdParam !== selectedPatientId) {
+        setSelectedPatientId(patientIdParam);
+        // Auto-select best referral for this patient
+        const bestReferral = allReferrals
+          .filter(r => r.patient_id === patientIdParam && !r.isExpired && !r.isExhausted)
+          .sort((a, b) => {
+            const dateA = a.referral_start_date ? new Date(a.referral_start_date).getTime() : 0;
+            const dateB = b.referral_start_date ? new Date(b.referral_start_date).getTime() : 0;
+            return dateA - dateB;
+          })[0];
+        if (bestReferral) {
+          setSelectedReferralId(bestReferral.id);
+        }
+      }
+      setShowDialog(true);
+    }
+  }, [searchParams, allReferrals]);
 
   const loadData = async () => {
     const supabase = createClient();
@@ -173,6 +204,20 @@ function VisitsContent() {
 
     setPatients(patientsWithReferrals);
     setLoading(false);
+
+    // Auto-select best referral for preselected patient (from URL param)
+    if (preselectedPatientId && !selectedReferralId) {
+      const bestReferral = referralsWithUsage
+        .filter(r => r.patient_id === preselectedPatientId && !r.isExpired && !r.isExhausted)
+        .sort((a, b) => {
+          const dateA = a.referral_start_date ? new Date(a.referral_start_date).getTime() : 0;
+          const dateB = b.referral_start_date ? new Date(b.referral_start_date).getTime() : 0;
+          return dateA - dateB;
+        })[0];
+      if (bestReferral) {
+        setSelectedReferralId(bestReferral.id);
+      }
+    }
   };
 
   // Get referrals for the selected patient (for the dropdown)
@@ -263,14 +308,23 @@ function VisitsContent() {
       }
       setPaymentMethod('CASH');
 
+      // Check if the visit was added for today
+      const today = getLocalDateString();
+      const wasAddedForToday = visitDate === today;
+
       // Reset visit form
       setSelectedPatientId('');
       setSelectedReferralId('');
       setVisitDate(getLocalDateString());
       setIsBillable(true);
 
+      // If added for today, switch to "Today" filter so user sees it immediately
+      if (wasAddedForToday) {
+        setDateFilter('today');
+      }
+
       // Reload data and show payment prompt
-      loadData();
+      await loadData();
       router.refresh();
       router.replace('/visits');
       setShowPaymentDialog(true);
@@ -303,8 +357,11 @@ function VisitsContent() {
       setPaymentAmount('');
       setPaymentMethod('CASH');
       setCollectionResult(null);
+      showToast(`$${parseFloat(paymentAmount).toFixed(2)} payment collected`);
       loadData();
       router.refresh();
+    } else {
+      showToast('Failed to log payment', 'error');
     }
     setSavingPayment(false);
   };
@@ -318,8 +375,9 @@ function VisitsContent() {
     setCollectionResult(null);
   };
 
-  // Group visits by date
-  const groupedVisits = visits.reduce((acc, visit) => {
+  // Filter and group visits by date
+  const filteredVisits = visits.filter(visit => isDateInRange(visit.visit_date, dateFilter));
+  const groupedVisits = filteredVisits.reduce((acc, visit) => {
     const date = visit.visit_date;
     if (!acc[date]) acc[date] = [];
     acc[date].push(visit);
@@ -331,7 +389,11 @@ function VisitsContent() {
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{visitLabelPlural}</h1>
-          <p className="text-gray-500 text-sm">{visits.length} total {visitLabelPlural.toLowerCase()}</p>
+          <p className="text-gray-500 text-sm">
+            {dateFilter === 'all'
+              ? `${visits.length} total ${visitLabelPlural.toLowerCase()}`
+              : `${filteredVisits.length} of ${visits.length} ${visitLabelPlural.toLowerCase()}`}
+          </p>
         </div>
         <Dialog open={showDialog} onOpenChange={setShowDialog}>
           <DialogTrigger asChild>
@@ -506,6 +568,11 @@ function VisitsContent() {
         </Dialog>
       </header>
 
+      {/* Date Filter Pills */}
+      {visits.length > 0 && (
+        <DateFilterPills value={dateFilter} onChange={setDateFilter} />
+      )}
+
       {/* Visit/Session List */}
       {loading ? (
         <LoadingSpinner text={`Loading ${visitLabelPlural.toLowerCase()}...`} />
@@ -546,11 +613,34 @@ function VisitsContent() {
           ))}
         </div>
       ) : (
-        <Card>
+        <Card className="border-dashed border-2 border-gray-200 bg-gray-50/50">
           <CardContent className="py-12 text-center">
-            <CalendarIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500 mb-4">No {visitLabelPlural.toLowerCase()} recorded yet</p>
-            <Button onClick={() => setShowDialog(true)}>Log Your First {visitLabel}</Button>
+            <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <CalendarIcon className="w-8 h-8 text-emerald-600" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Ready to log your first {visitLabel.toLowerCase()}?</h3>
+            {patients.length === 0 ? (
+              <>
+                <p className="text-gray-600 mb-6 max-w-sm mx-auto">
+                  First, add a {clientLabel.toLowerCase()} to get started. Then come back here to log their {visitLabelPlural.toLowerCase()}.
+                </p>
+                <Button variant="outline" onClick={() => router.push('/patients?action=new')}>
+                  Add Your First {clientLabel}
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-600 mb-6 max-w-sm mx-auto">
+                  Select a {clientLabel.toLowerCase()} and log a {visitLabel.toLowerCase()}. You&apos;ll be prompted to collect payment right after.
+                </p>
+                <Button onClick={() => setShowDialog(true)}>
+                  Log {visitLabel}
+                </Button>
+              </>
+            )}
+            <p className="text-xs text-gray-500 mt-6">
+              Tip: Use the green &quot;Add {visitLabel}&quot; button in the bottom right for quick access
+            </p>
           </CardContent>
         </Card>
       )}

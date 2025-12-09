@@ -9,12 +9,11 @@ import {
   getTodaysPayments,
   getWeeklyPaymentsSummary,
   getTodaysCopaysCollected,
-  getClaimsPaidThisWeek,
-  getInsurancePaymentsThisWeek,
   getReferralAlerts,
   getOverdueClaimsCount,
   getPracticeConfig,
   getAdminFeatureFlags,
+  getRecentPatients,
 } from '@/lib/db/ops-queries';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -56,10 +55,9 @@ export default async function DashboardPage() {
     todaysPayments,
     weeklyPayments,
     copaysCollected,
-    claimsPaidThisWeek,
-    insuranceThisWeek,
     referralAlerts,
     overdueClaimsCount,
+    recentPatients,
   ] = await Promise.all([
     getProfile(),
     getPracticeConfig(),
@@ -70,10 +68,9 @@ export default async function DashboardPage() {
     getTodaysPayments(),
     getWeeklyPaymentsSummary(),
     getTodaysCopaysCollected(),
-    getClaimsPaidThisWeek(),
-    getInsurancePaymentsThisWeek(),
     getReferralAlerts(),
     getOverdueClaimsCount(14), // 14 days threshold per reference
+    getRecentPatients(5),
   ]);
 
   const userName = profile?.full_name || 'there';
@@ -205,14 +202,9 @@ export default async function DashboardPage() {
         {/* Left Column */}
         <div className="space-y-6">
           {/* Today's Visits/Sessions List */}
-          <Card>
+          <Card className={todaysVisits.length > 0 ? 'border-emerald-200 bg-emerald-50/30' : ''}>
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base font-semibold">Today&apos;s {features.visitLabelPlural}</CardTitle>
-                <Link href="/visits" className="text-sm text-blue-600 hover:underline">
-                  View All →
-                </Link>
-              </div>
+              <CardTitle className="text-base font-semibold">Today&apos;s {features.visitLabelPlural}</CardTitle>
             </CardHeader>
             <CardContent>
               {todaysVisits.length > 0 ? (
@@ -222,29 +214,26 @@ export default async function DashboardPage() {
                     const displayAmount = isPaid ? visit.paidAmount : visit.collectAmount;
                     return (
                       <div key={visit.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-2 h-2 rounded-full ${isPaid ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-                          <div>
-                            <p className="font-medium text-gray-900">
-                              {visit.patient?.display_name || 'Unknown'}
-                            </p>
-                            {features.showInsuranceFields && (
+                        <div>
+                          <p className="font-medium text-gray-900">
+                            {visit.patient?.display_name || 'Unknown'}
+                          </p>
+                          {features.showInsuranceFields && (
                             <p className="text-xs text-gray-500">
                               {visit.patient?.insurer_name || 'Self-pay'}
                             </p>
                           )}
-                          </div>
                         </div>
-                        <div className="text-right flex items-center gap-1">
+                        <div className="text-right">
                           {displayAmount && displayAmount > 0 ? (
-                            <>
+                            <div className="flex items-center gap-2 justify-end">
                               <span className={`font-semibold ${isPaid ? 'text-emerald-600' : 'text-gray-900'}`}>
                                 ${displayAmount.toFixed(2)}
                               </span>
-                              {isPaid && (
-                                <CheckIcon className="w-4 h-4 text-emerald-500" />
-                              )}
-                            </>
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${isPaid ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {isPaid ? 'Paid' : 'Collect'}
+                              </span>
+                            </div>
                           ) : (
                             <span className="text-gray-400 text-sm">-</span>
                           )}
@@ -254,7 +243,15 @@ export default async function DashboardPage() {
                   })}
                 </div>
               ) : (
-                <p className="text-gray-500 text-sm py-4 text-center">No {features.visitLabelPlural.toLowerCase()} logged today</p>
+                <div className="text-center py-6">
+                  <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <CalendarIcon className="w-6 h-6 text-gray-400" />
+                  </div>
+                  <p className="text-gray-500 text-sm">No {features.visitLabelPlural.toLowerCase()} logged today</p>
+                  <Link href="/visits?action=new" className="text-sm text-blue-600 hover:underline mt-2 inline-block">
+                    Add your first {features.visitLabel.toLowerCase()} →
+                  </Link>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -263,12 +260,7 @@ export default async function DashboardPage() {
           {showClaims && (
             <Card>
               <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base font-semibold">Pending Claims</CardTitle>
-                  <Link href="/claims" className="text-sm text-blue-600 hover:underline">
-                    View All Claims →
-                  </Link>
-                </div>
+                <CardTitle className="text-base font-semibold">Pending Claims</CardTitle>
               </CardHeader>
               <CardContent>
                 {pendingClaims.length > 0 ? (
@@ -333,12 +325,7 @@ export default async function DashboardPage() {
           {features.showReferrals && (
             <Card>
               <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base font-semibold">Referral Alerts</CardTitle>
-                  <Link href="/patients" className="text-sm text-blue-600 hover:underline">
-                    Manage Referrals →
-                  </Link>
-                </div>
+                <CardTitle className="text-base font-semibold">Referral Alerts</CardTitle>
               </CardHeader>
               <CardContent>
                 {totalReferralAlerts > 0 ? (
@@ -433,12 +420,7 @@ export default async function DashboardPage() {
           {/* Today's Payments */}
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base font-semibold">Today&apos;s Payments</CardTitle>
-                <Link href="/payments" className="text-sm text-blue-600 hover:underline">
-                  Payment History →
-                </Link>
-              </div>
+              <CardTitle className="text-base font-semibold">Today&apos;s Payments</CardTitle>
             </CardHeader>
             <CardContent>
               {todaysPayments.length > 0 ? (
@@ -471,131 +453,59 @@ export default async function DashboardPage() {
               ) : (
                 <p className="text-gray-500 text-sm py-4 text-center">No payments today</p>
               )}
-
-              {/* This Week's Snapshot */}
-              <div className="mt-6 pt-4 border-t border-gray-100">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">This Week&apos;s Snapshot</p>
-                <div className={`grid gap-3 ${showClaims ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                  <div className="bg-gray-50 rounded-lg p-3 text-center">
-                    <div className="text-xl font-bold text-gray-900">{summary.visits_this_week}</div>
-                    <p className="text-xs text-gray-500">{features.visitLabelPlural}</p>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg p-3 text-center">
-                    <div className="text-xl font-bold text-gray-900">
-                      ${(weeklyPayments.thisWeek + insuranceThisWeek).toLocaleString()}
-                    </div>
-                    <p className="text-xs text-gray-500">
-                      {showClaims && insuranceThisWeek > 0 ? 'Total Revenue' : 'Collected'}
-                    </p>
-                    {showClaims && insuranceThisWeek > 0 && (
-                      <p className="text-xs text-blue-600 mt-0.5">
-                        ${insuranceThisWeek.toLocaleString()} ins
-                      </p>
-                    )}
-                  </div>
-                  {showClaims && (
-                    <div className="bg-gray-50 rounded-lg p-3 text-center">
-                      <div className="text-xl font-bold text-gray-900">{claimsPaidThisWeek}</div>
-                      <p className="text-xs text-gray-500">Claims Paid</p>
-                    </div>
-                  )}
-                </div>
-              </div>
             </CardContent>
           </Card>
-        </div>
-      </div>
 
-      {/* Quick Actions */}
-      <div className="space-y-3">
-        <h2 className="text-base font-semibold text-gray-900">Quick Actions</h2>
-        <div className={`grid gap-3 ${showClaims ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2'}`}>
-          <Link
-            href="/visits?action=new"
-            className="flex flex-col items-center gap-2 p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all text-center"
-          >
-            <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
-              <CalendarIcon className="w-5 h-5 text-blue-600" />
-            </div>
-            <span className="text-sm font-medium text-gray-900">Add {features.visitLabel}</span>
-          </Link>
-
-          {showClaims && (
-            <Link
-              href="/claims?action=new"
-              className="flex flex-col items-center gap-2 p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all text-center"
-            >
-              <div className="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center">
-                <ClaimIcon className="w-5 h-5 text-purple-600" />
-              </div>
-              <span className="text-sm font-medium text-gray-900">Submit Claim</span>
-            </Link>
-          )}
-
-          <Link
-            href="/patients?action=new"
-            className="flex flex-col items-center gap-2 p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all text-center"
-          >
-            <div className="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center">
-              <UserIcon className="w-5 h-5 text-green-600" />
-            </div>
-            <span className="text-sm font-medium text-gray-900">New {features.patientLabel}</span>
-          </Link>
-
-          {features.showReferrals && (
-            <Link
-              href="/patients"
-              className="flex flex-col items-center gap-2 p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all text-center"
-            >
-              <div className="w-10 h-10 bg-amber-50 rounded-lg flex items-center justify-center">
-                <RefreshIcon className="w-5 h-5 text-amber-600" />
-              </div>
-              <span className="text-sm font-medium text-gray-900">New Referral</span>
-            </Link>
+          {/* Recent Patients */}
+          {recentPatients.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base font-semibold">Recent {features.patientLabelPlural}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {recentPatients.map((patient) => (
+                    <Link
+                      key={patient.id}
+                      href={`/patients/${patient.id}`}
+                      className="flex items-center justify-between py-2 px-2 -mx-2 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                          <span className="text-blue-600 text-sm font-medium">
+                            {patient.display_name.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-900">{patient.display_name}</p>
+                          {features.showInsuranceFields && patient.insurer_name && (
+                            <p className="text-xs text-gray-500">{patient.insurer_name}</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-500">
+                          {formatDate(patient.last_visit_date, { month: 'short', day: 'numeric' })}
+                        </p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           )}
         </div>
       </div>
+
     </div>
   );
 }
 
 // Icons
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-    </svg>
-  );
-}
-
 function CalendarIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-    </svg>
-  );
-}
-
-function ClaimIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-    </svg>
-  );
-}
-
-function UserIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-    </svg>
-  );
-}
-
-function RefreshIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
     </svg>
   );
 }

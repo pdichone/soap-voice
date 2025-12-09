@@ -415,6 +415,12 @@ export interface Practitioner {
   updated_at: string;
   created_by: string | null;
   deleted_at: string | null;
+  // Onboarding fields
+  onboarding_status: string | null;
+  onboarding_notes: string | null;
+  onboarding_started_at: string | null;
+  onboarding_completed_at: string | null;
+  onboarding_checklist: Record<string, boolean> | null;
 }
 
 export interface PractitionerWithStats extends Practitioner {

@@ -88,7 +88,7 @@ function normalizeClient(csv: CSVClient): NormalizedClient | null {
   const noteParts = [csv.notes, csv.comments, csv.preferences].filter(Boolean);
   const notes = noteParts.length > 0 ? noteParts.join('\n') : null;
 
-  // De-identify the name for privacy (e.g., "Paulo Dichone" -> "Paulo D.")
+  // De-identify the name for privacy (e.g., "John Doe" -> "John D.")
   return { name: deidentifyName(name.trim()), phone, email, notes };
 }
 

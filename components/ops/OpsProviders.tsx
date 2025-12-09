@@ -3,6 +3,7 @@
 import { ReactNode } from 'react';
 import { PracticeConfigProvider, usePracticeConfig } from '@/lib/practice-config';
 import { FeatureFlagsProvider } from '@/lib/feature-flags';
+import { ToastProvider } from '@/lib/toast-context';
 import { Onboarding } from './Onboarding';
 
 interface OpsProvidersProps {
@@ -35,7 +36,9 @@ export function OpsProviders({ children }: OpsProvidersProps) {
   return (
     <PracticeConfigProvider>
       <FeatureFlagsProvider>
-        <OpsContent>{children}</OpsContent>
+        <ToastProvider>
+          <OpsContent>{children}</OpsContent>
+        </ToastProvider>
       </FeatureFlagsProvider>
     </PracticeConfigProvider>
   );

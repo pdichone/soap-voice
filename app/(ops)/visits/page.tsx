@@ -88,6 +88,7 @@ function VisitsContent() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // React to URL parameter changes (e.g., from FAB navigation)
@@ -113,6 +114,7 @@ function VisitsContent() {
       }
       setShowDialog(true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, allReferrals]);
 
   const loadData = async () => {

@@ -55,6 +55,7 @@ export function GenerateSummaryDialog({
       loadPayments();
       loadPracticeSettings();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, dateRange, patientId, dialogState]);
 
   const getDateRange = (): { start: string; end: string; startDate: Date; endDate: Date } => {

@@ -47,7 +47,7 @@ export default function DangerZonePage() {
       setResult(data);
       setShowConfirmDialog(false);
       setConfirmationText('');
-    } catch (err) {
+    } catch {
       setError('Network error. Please try again.');
     } finally {
       setIsDeleting(false);

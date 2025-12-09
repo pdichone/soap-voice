@@ -10,6 +10,8 @@ import { ONBOARDING_STATUS_CONFIG } from '@/lib/onboarding-constants';
 import type { PractitionerWithStats } from '@/lib/types-ops';
 import type { OnboardingStatus } from '@/lib/types-onboarding';
 
+export const dynamic = 'force-dynamic';
+
 function getStatusBadgeVariant(status: string) {
   switch (status) {
     case 'active':

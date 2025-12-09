@@ -1,17 +1,36 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 
 const isDevMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [devLoading, setDevLoading] = useState(isDevMode);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Handle magic link redirect - if code or token_hash is present, redirect to callback
+  useEffect(() => {
+    const code = searchParams.get('code');
+    const tokenHash = searchParams.get('token_hash');
+
+    if (code || tokenHash) {
+      // Redirect to auth callback with the same parameters
+      const params = new URLSearchParams();
+      if (code) params.set('code', code);
+      if (tokenHash) params.set('token_hash', tokenHash);
+      const type = searchParams.get('type');
+      if (type) params.set('type', type);
+
+      router.replace(`/auth/callback?${params.toString()}`);
+      return;
+    }
+  }, [searchParams, router]);
 
   // Auto-login in dev mode
   useEffect(() => {

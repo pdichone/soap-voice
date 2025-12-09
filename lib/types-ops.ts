@@ -387,6 +387,16 @@ export type BillingStatus = 'trial' | 'paying' | 'overdue' | 'cancelled' | 'comp
 export type AdminRole = 'admin' | 'super_admin' | 'support';
 export type EventActorType = 'admin' | 'practitioner' | 'system';
 
+export type StripeSubscriptionStatus =
+  | 'trialing'
+  | 'active'
+  | 'past_due'
+  | 'canceled'
+  | 'unpaid'
+  | 'incomplete'
+  | 'incomplete_expired'
+  | 'paused';
+
 export interface Practitioner {
   id: string;
   user_id: string | null;
@@ -401,6 +411,12 @@ export interface Practitioner {
   trial_ends_at: string | null;
   billing_started_at: string | null;
   billing_notes: string | null;
+  // Stripe billing fields
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  stripe_price_id: string | null;
+  subscription_status: StripeSubscriptionStatus | null;
+  current_period_end: string | null;
   feature_claims_tracking: boolean;
   feature_year_end_summary: boolean;
   feature_insurance_calculator: boolean;

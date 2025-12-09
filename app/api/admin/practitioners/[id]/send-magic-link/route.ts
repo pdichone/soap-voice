@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAdmin, getAdminUser } from '@/lib/admin-auth';
 import { logAdminEvent } from '@/lib/db/admin-queries';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '@/lib/env';
 
 // Use service role for admin operations
 const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
@@ -82,8 +83,8 @@ export async function POST(
       const cookieStore = await cookies();
 
       const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY,
         {
           cookies: {
             getAll() {

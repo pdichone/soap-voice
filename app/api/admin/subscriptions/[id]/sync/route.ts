@@ -34,11 +34,10 @@ export async function POST(
     }
 
     // Try to find subscription - either by stored ID or by looking up customer's subscriptions
-    let subscription: Awaited<ReturnType<typeof stripe.subscriptions.retrieve>>;
+    let subscriptionId: string;
 
     if (practitioner.stripe_subscription_id) {
-      // Use existing subscription ID
-      subscription = await stripe.subscriptions.retrieve(practitioner.stripe_subscription_id);
+      subscriptionId = practitioner.stripe_subscription_id;
     } else if (practitioner.stripe_customer_id) {
       // Look up subscription by customer ID
       const subscriptions = await stripe.subscriptions.list({
@@ -54,13 +53,16 @@ export async function POST(
         );
       }
 
-      subscription = subscriptions.data[0];
+      subscriptionId = subscriptions.data[0].id;
     } else {
       return NextResponse.json(
         { error: 'No Stripe customer or subscription ID found' },
         { status: 400 }
       );
     }
+
+    // Fetch full subscription details
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
     // Map Stripe status to billing status
     let billingStatus: string;

@@ -61,6 +61,7 @@ export default function SubscriptionDetailPage({
   const [extendLoading, setExtendLoading] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [refundLoading, setRefundLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
   const [refundReason, setRefundReason] = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showRefundForm, setShowRefundForm] = useState(false);
@@ -169,6 +170,26 @@ export default function SubscriptionDetailPage({
       alert(err instanceof Error ? err.message : 'Failed to issue refund');
     } finally {
       setRefundLoading(false);
+    }
+  }
+
+  async function handleSyncStripe() {
+    setSyncLoading(true);
+    try {
+      const res = await fetch(`/api/admin/subscriptions/${id}/sync`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to sync with Stripe');
+      }
+      const data = await res.json();
+      await fetchSubscription();
+      alert(`Subscription synced: ${data.previous_status} → ${data.new_status}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to sync with Stripe');
+    } finally {
+      setSyncLoading(false);
     }
   }
 
@@ -312,6 +333,24 @@ export default function SubscriptionDetailPage({
           <CardDescription>Manage this subscription</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Sync with Stripe */}
+          {subscription.stripe_subscription_id && (
+            <div className="flex items-center justify-between pb-4 border-b">
+              <div>
+                <div className="text-sm font-medium text-slate-700">Sync with Stripe</div>
+                <p className="text-xs text-slate-500">Pull latest subscription status from Stripe</p>
+              </div>
+              <Button
+                onClick={handleSyncStripe}
+                disabled={syncLoading}
+                variant="outline"
+                size="sm"
+              >
+                {syncLoading ? 'Syncing...' : 'Sync Now'}
+              </Button>
+            </div>
+          )}
+
           {/* Extend Trial */}
           <div className="flex items-end gap-4">
             <div>

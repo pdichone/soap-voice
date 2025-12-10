@@ -16,7 +16,7 @@ import type { PracticeType } from '@/lib/types-ops';
 import type { OnboardingStatus, OnboardingChecklist } from '@/lib/types-onboarding';
 
 interface Props {
-  params: Promise<{ id: string }>;
+  params: Promise<{ id: string }> | { id: string };
 }
 
 function formatDate(date: string | null) {
@@ -39,7 +39,9 @@ function formatCurrency(amount: number | null) {
 }
 
 export default async function PractitionerDetailPage({ params }: Props) {
-  const { id } = await params;
+  // Handle both Promise and non-Promise params for Next.js 14 compatibility
+  const resolvedParams = 'then' in params ? await params : params;
+  const { id } = resolvedParams;
 
   const [practitioner, activity, questionnaire] = await Promise.all([
     getPractitionerById(id),

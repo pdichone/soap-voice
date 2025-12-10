@@ -144,55 +144,134 @@ function BillingPageContent() {
         </div>
       )}
 
-      {/* Current Status */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Current Plan</CardTitle>
-          <CardDescription>Your subscription status</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-3">
-                <span className="text-2xl font-bold capitalize">
-                  {billing?.plan_type || 'Trial'}
-                </span>
-                {isTrialing && trialDaysRemaining > 0 && (
-                  <Badge variant="outline" className="text-blue-600 border-blue-600">
-                    {trialDaysRemaining} days left in trial
-                  </Badge>
-                )}
-                {hasActiveSubscription && !isTrialing && (
+      {/* Current Status - Enhanced for subscribed users */}
+      {hasActiveSubscription && !isTrialing ? (
+        <Card className="border-2 border-green-200 bg-green-50/50">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-3">
+                  <CardTitle className="text-2xl capitalize">
+                    {billing?.plan_type || 'Solo'} Plan
+                  </CardTitle>
                   <Badge className="bg-green-500">Active</Badge>
-                )}
-                {billing?.billing_status === 'overdue' && (
-                  <Badge variant="destructive">Payment Overdue</Badge>
-                )}
-                {billing?.billing_status === 'cancelled' && (
-                  <Badge variant="secondary">Cancelled</Badge>
+                </div>
+                <CardDescription className="mt-1">
+                  {billing?.plan_type && PLANS[billing.plan_type as keyof typeof PLANS]
+                    ? PLANS[billing.plan_type as keyof typeof PLANS].description
+                    : 'Full access to ZenLeef'}
+                </CardDescription>
+              </div>
+              <div className="text-right">
+                <div className="text-3xl font-bold">
+                  ${billing?.plan_type && PLANS[billing.plan_type as keyof typeof PLANS]
+                    ? PLANS[billing.plan_type as keyof typeof PLANS].price
+                    : 39}
+                  <span className="text-sm font-normal text-slate-500">/month</span>
+                </div>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {/* Features list */}
+              <div className="grid md:grid-cols-2 gap-2">
+                {(billing?.plan_type && PLANS[billing.plan_type as keyof typeof PLANS]
+                  ? PLANS[billing.plan_type as keyof typeof PLANS].features
+                  : PLANS.solo.features
+                ).map((feature) => (
+                  <div key={feature} className="flex items-center gap-2 text-sm">
+                    <svg
+                      className="w-4 h-4 text-green-600 flex-shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                    <span className="text-slate-700">{feature}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Billing info and actions */}
+              <div className="flex items-center justify-between pt-4 border-t border-green-200">
+                <div>
+                  {billing?.current_period_end && (
+                    <p className="text-sm text-slate-600">
+                      Next billing date:{' '}
+                      <span className="font-medium">
+                        {new Date(billing.current_period_end).toLocaleDateString('en-US', {
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </span>
+                    </p>
+                  )}
+                </div>
+                <Button
+                  onClick={handlePortal}
+                  disabled={portalLoading}
+                >
+                  {portalLoading ? 'Loading...' : 'Manage Billing'}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle>Current Plan</CardTitle>
+            <CardDescription>Your subscription status</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl font-bold capitalize">
+                    {billing?.plan_type || 'Trial'}
+                  </span>
+                  {isTrialing && trialDaysRemaining > 0 && (
+                    <Badge variant="outline" className="text-blue-600 border-blue-600">
+                      {trialDaysRemaining} days left in trial
+                    </Badge>
+                  )}
+                  {billing?.billing_status === 'overdue' && (
+                    <Badge variant="destructive">Payment Overdue</Badge>
+                  )}
+                  {billing?.billing_status === 'cancelled' && (
+                    <Badge variant="secondary">Cancelled</Badge>
+                  )}
+                </div>
+
+                {billing?.current_period_end && hasActiveSubscription && (
+                  <p className="text-sm text-slate-500 mt-2">
+                    {isTrialing ? 'Trial ends' : 'Next billing date'}:{' '}
+                    {new Date(billing.current_period_end).toLocaleDateString()}
+                  </p>
                 )}
               </div>
 
-              {billing?.current_period_end && hasActiveSubscription && (
-                <p className="text-sm text-slate-500 mt-2">
-                  {isTrialing ? 'Trial ends' : 'Next billing date'}:{' '}
-                  {new Date(billing.current_period_end).toLocaleDateString()}
-                </p>
+              {billing?.stripe_customer_id && (
+                <Button
+                  variant="outline"
+                  onClick={handlePortal}
+                  disabled={portalLoading}
+                >
+                  {portalLoading ? 'Loading...' : 'Manage Billing'}
+                </Button>
               )}
             </div>
-
-            {billing?.stripe_customer_id && (
-              <Button
-                variant="outline"
-                onClick={handlePortal}
-                disabled={portalLoading}
-              >
-                {portalLoading ? 'Loading...' : 'Manage Billing'}
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Pricing Plans */}
       {(!hasActiveSubscription || isTrialing) && (

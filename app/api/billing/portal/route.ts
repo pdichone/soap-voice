@@ -1,10 +1,10 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { stripe } from '@/lib/stripe';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '@/lib/env';
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
     // Get authenticated user
     const cookieStore = await cookies();
@@ -48,8 +48,9 @@ export async function POST() {
       );
     }
 
-    // Get the site URL for redirect
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+    // Get the site URL for redirect - use the origin from the request to maintain session cookies
+    const origin = request.headers.get('origin') || request.headers.get('referer')?.split('/').slice(0, 3).join('/');
+    const siteUrl = origin || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
     // Create Customer Portal session
     const session = await stripe.billingPortal.sessions.create({

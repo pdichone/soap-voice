@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { stripe, PLANS, type PlanType } from '@/lib/stripe';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '@/lib/env';
+
+// Admin client for updating data (bypasses RLS)
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function POST(request: NextRequest) {
   try {
@@ -71,11 +78,17 @@ export async function POST(request: NextRequest) {
       });
       customerId = customer.id;
 
-      // Save customer ID to database
-      await supabase
+      // Save customer ID to database (use admin client to bypass RLS)
+      const { error: updateError } = await supabaseAdmin
         .from('practitioners')
         .update({ stripe_customer_id: customerId })
         .eq('id', practitioner.id);
+
+      if (updateError) {
+        console.error('Error saving stripe_customer_id:', updateError);
+      } else {
+        console.log('Saved stripe_customer_id:', customerId, 'for practitioner:', practitioner.id);
+      }
     }
 
     // Get the site URL for redirects - use the origin from the request to maintain session cookies

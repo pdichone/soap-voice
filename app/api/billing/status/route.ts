@@ -72,11 +72,19 @@ export async function GET() {
 
     // If user has a Stripe customer ID but no active subscription in our DB,
     // sync from Stripe directly (handles webhook failures)
+    console.log('Billing status check:', {
+      stripe_customer_id: practitioner.stripe_customer_id,
+      subscription_status: practitioner.subscription_status,
+      needs_sync: practitioner.stripe_customer_id && practitioner.subscription_status !== 'active',
+    });
+
     if (
       practitioner.stripe_customer_id &&
       practitioner.subscription_status !== 'active'
     ) {
       try {
+        console.log('Checking Stripe for subscriptions, customer:', practitioner.stripe_customer_id);
+
         // Check Stripe for active subscriptions
         const subscriptions = await stripe.subscriptions.list({
           customer: practitioner.stripe_customer_id,
@@ -84,8 +92,11 @@ export async function GET() {
           limit: 1,
         });
 
+        console.log('Stripe subscriptions found:', subscriptions.data.length);
+
         if (subscriptions.data.length > 0) {
           const subscription = subscriptions.data[0];
+          console.log('Found active subscription:', subscription.id, 'status:', subscription.status);
 
           // Get plan type from subscription metadata or price
           const planType = subscription.metadata?.plan_type ||
@@ -101,16 +112,24 @@ export async function GET() {
             billing_status: 'paying',
           };
 
-          await supabaseAdmin
+          const { error: updateError } = await supabaseAdmin
             .from('practitioners')
             .update(updateData)
             .eq('id', practitioner.id);
+
+          if (updateError) {
+            console.error('Error updating practitioner with Stripe data:', updateError);
+          } else {
+            console.log('Successfully synced subscription data to database');
+          }
 
           // Return updated data
           return NextResponse.json({
             ...practitioner,
             ...updateData,
           });
+        } else {
+          console.log('No active subscriptions found in Stripe');
         }
       } catch (stripeError) {
         console.error('Error syncing from Stripe:', stripeError);

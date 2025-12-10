@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -46,9 +46,11 @@ function formatDateTime(date: string | null) {
 export default function SubscriptionDetailPage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: Promise<{ id: string }> | { id: string };
 }) {
-  const { id } = use(params);
+  // Handle both Promise and non-Promise params for Next.js 14 compatibility
+  const resolvedParams = params && 'then' in params ? null : params;
+  const [id, setId] = useState<string>(resolvedParams?.id || '');
   const [subscription, setSubscription] = useState<SubscriptionDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,8 +64,17 @@ export default function SubscriptionDetailPage({
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showRefundForm, setShowRefundForm] = useState(false);
 
+  // Handle Promise params on mount
   useEffect(() => {
-    fetchSubscription();
+    if (params && 'then' in params) {
+      params.then((resolved) => setId(resolved.id));
+    }
+  }, [params]);
+
+  useEffect(() => {
+    if (id) {
+      fetchSubscription();
+    }
   }, [id]);
 
   async function fetchSubscription() {

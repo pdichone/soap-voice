@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useState, useEffect, Suspense, useCallback, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,31 +20,62 @@ interface BillingData {
 
 function BillingPageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [billing, setBilling] = useState<BillingData | null>(null);
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
+  const pollCountRef = useRef(0);
 
   const success = searchParams.get('success');
   const canceled = searchParams.get('canceled');
 
-  useEffect(() => {
-    fetchBillingData();
-  }, []);
-
-  async function fetchBillingData() {
+  const fetchBillingData = useCallback(async () => {
     try {
       const res = await fetch('/api/billing/status');
       if (res.ok) {
         const data = await res.json();
         setBilling(data);
+        return data;
       }
     } catch (error) {
       console.error('Error fetching billing data:', error);
     } finally {
       setLoading(false);
     }
-  }
+    return null;
+  }, []);
+
+  // Initial fetch and polling for post-checkout
+  useEffect(() => {
+    fetchBillingData();
+
+    // If we just came from checkout success, poll for subscription activation
+    if (success === 'true') {
+      setIsProcessingCheckout(true);
+      pollCountRef.current = 0;
+
+      const pollInterval = setInterval(async () => {
+        pollCountRef.current += 1;
+        const data = await fetchBillingData();
+
+        // Stop polling if subscription is active or we've polled enough times
+        if (data?.subscription_status && isSubscriptionActive(data.subscription_status)) {
+          setIsProcessingCheckout(false);
+          clearInterval(pollInterval);
+          // Remove the success param from URL after subscription is confirmed
+          router.replace('/settings/billing');
+        } else if (pollCountRef.current >= 10) {
+          // After ~30 seconds, stop polling but keep showing success
+          setIsProcessingCheckout(false);
+          clearInterval(pollInterval);
+        }
+      }, 3000); // Poll every 3 seconds
+
+      return () => clearInterval(pollInterval);
+    }
+  }, [success, fetchBillingData, router]);
 
   async function handleCheckout(planType: 'founder' | 'solo') {
     setCheckoutLoading(planType);
@@ -96,6 +127,9 @@ function BillingPageContent() {
     ? isSubscriptionActive(billing.subscription_status)
     : false;
 
+  // Consider checkout as successful if success param is present (even if webhook hasn't processed yet)
+  const showAsSubscribed = hasActiveSubscription || (success === 'true');
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -139,7 +173,7 @@ function BillingPageContent() {
       )}
 
       {/* Current Status - Enhanced for subscribed users */}
-      {hasActiveSubscription ? (
+      {showAsSubscribed ? (
         <Card className="border-2 border-green-200 bg-green-50/50">
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -148,10 +182,21 @@ function BillingPageContent() {
                   <CardTitle className="text-2xl capitalize">
                     {billing?.plan_type || 'Solo'} Plan
                   </CardTitle>
-                  <Badge className="bg-green-500">Active</Badge>
+                  {isProcessingCheckout ? (
+                    <Badge className="bg-blue-500">
+                      <div className="flex items-center gap-1">
+                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+                        Activating...
+                      </div>
+                    </Badge>
+                  ) : (
+                    <Badge className="bg-green-500">Active</Badge>
+                  )}
                 </div>
                 <CardDescription className="mt-1">
-                  {billing?.plan_type && PLANS[billing.plan_type as keyof typeof PLANS]
+                  {isProcessingCheckout
+                    ? 'Your subscription is being activated. This usually takes just a moment.'
+                    : billing?.plan_type && PLANS[billing.plan_type as keyof typeof PLANS]
                     ? PLANS[billing.plan_type as keyof typeof PLANS].description
                     : 'Full access to ZenLeef'}
                 </CardDescription>
@@ -196,7 +241,7 @@ function BillingPageContent() {
               {/* Billing info and actions */}
               <div className="flex items-center justify-between pt-4 border-t border-green-200">
                 <div>
-                  {billing?.current_period_end && (
+                  {billing?.current_period_end && !isProcessingCheckout && (
                     <p className="text-sm text-slate-600">
                       Next billing date:{' '}
                       <span className="font-medium">
@@ -208,10 +253,15 @@ function BillingPageContent() {
                       </span>
                     </p>
                   )}
+                  {isProcessingCheckout && (
+                    <p className="text-sm text-slate-600">
+                      Waiting for payment confirmation...
+                    </p>
+                  )}
                 </div>
                 <Button
                   onClick={handlePortal}
-                  disabled={portalLoading}
+                  disabled={portalLoading || isProcessingCheckout}
                 >
                   {portalLoading ? 'Loading...' : 'Manage Billing'}
                 </Button>
@@ -258,8 +308,8 @@ function BillingPageContent() {
         </Card>
       )}
 
-      {/* Pricing Plans */}
-      {!hasActiveSubscription && (
+      {/* Pricing Plans - Hidden when subscribed or after successful checkout */}
+      {!showAsSubscribed && (
         <div>
           <h2 className="text-xl font-semibold mb-4">Choose a Plan</h2>
 

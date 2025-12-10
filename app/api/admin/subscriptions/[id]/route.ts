@@ -107,7 +107,7 @@ export async function GET(
       description: event.description,
       metadata: event.metadata,
       created_at: event.created_at,
-      admin_name: (event.admin_users as { name: string } | null)?.name || null,
+      admin_name: (event.admin_users as { name: string }[] | null)?.[0]?.name || null,
     }));
 
     // Build Stripe dashboard URLs

@@ -11,6 +11,7 @@ import { SeedDemoDataButton } from '@/components/admin/seed-demo-data-button';
 import { DeleteDemoDataButton } from '@/components/admin/delete-demo-data-button';
 import { ImpersonateButton } from '@/components/admin/impersonate-button';
 import { OnboardingSectionWrapper } from '@/components/admin/OnboardingSectionWrapper';
+import { BillingSection } from '@/components/admin/BillingSection';
 import type { PracticeType } from '@/lib/types-ops';
 import type { OnboardingStatus, OnboardingChecklist } from '@/lib/types-onboarding';
 
@@ -195,54 +196,22 @@ export default async function PractitionerDetailPage({ params }: Props) {
           </CardContent>
         </Card>
 
-        {/* Billing Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Billing</CardTitle>
-            <CardDescription>Plan and payment status</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-slate-500">Plan Type</label>
-              <p className="mt-1 text-slate-900 font-medium capitalize">{practitioner.plan_type}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-500">Billing Status</label>
-              <div className="mt-1">
-                <Badge
-                  variant={
-                    practitioner.billing_status === 'paying'
-                      ? 'default'
-                      : practitioner.billing_status === 'overdue'
-                      ? 'destructive'
-                      : 'outline'
-                  }
-                >
-                  {practitioner.billing_status}
-                </Badge>
-              </div>
-            </div>
-            {practitioner.monthly_price && (
-              <div>
-                <label className="text-sm font-medium text-slate-500">Monthly Price</label>
-                <p className="mt-1 text-slate-900">{formatCurrency(practitioner.monthly_price)}</p>
-              </div>
-            )}
-            {practitioner.trial_ends_at && (
-              <div>
-                <label className="text-sm font-medium text-slate-500">Trial Ends</label>
-                <p className="mt-1 text-slate-900">{formatDate(practitioner.trial_ends_at)}</p>
-              </div>
-            )}
-            {practitioner.billing_notes && (
-              <div>
-                <label className="text-sm font-medium text-slate-500">Notes</label>
-                <p className="mt-1 text-slate-600 text-sm">{practitioner.billing_notes}</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Billing Info - Now uses full-width BillingSection below */}
       </div>
+
+      {/* Billing Section */}
+      <BillingSection
+        practitionerId={practitioner.id}
+        practitionerEmail={practitioner.email}
+        practitionerName={practitioner.name}
+        planType={practitioner.plan_type}
+        billingStatus={practitioner.billing_status}
+        subscriptionStatus={practitioner.subscription_status}
+        monthlyPrice={practitioner.monthly_price}
+        trialEndsAt={practitioner.trial_ends_at}
+        stripeCustomerId={practitioner.stripe_customer_id}
+        stripeSubscriptionId={practitioner.stripe_subscription_id}
+      />
 
       {/* Onboarding */}
       <OnboardingSectionWrapper

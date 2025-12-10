@@ -50,7 +50,9 @@ export async function GET() {
 
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Future use: revenue_this_month calculation
+    const _startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    void _startOfMonth;
 
     // Count by subscription status
     const active_count = practitioners?.filter(

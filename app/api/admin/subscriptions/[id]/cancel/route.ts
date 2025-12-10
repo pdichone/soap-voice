@@ -92,11 +92,12 @@ export async function POST(
 
     // Log admin event
     await logAdminEvent({
-      admin_id: admin.id,
-      event_type: immediate ? 'subscription_canceled_immediate' : 'subscription_canceled_period_end',
+      actorType: 'admin',
+      actorId: admin.id,
+      actorEmail: admin.email,
+      eventType: immediate ? 'admin.subscription_canceled_immediate' : 'admin.subscription_canceled_period_end',
+      practitionerId: id,
       description: `Canceled subscription for ${practitioner.name || practitioner.email}${immediate ? ' (immediate)' : ' (at period end)'}`,
-      target_type: 'practitioner',
-      target_id: id,
       metadata: {
         immediate,
         reason,

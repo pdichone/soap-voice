@@ -85,11 +85,12 @@ export async function POST(
 
     // Log admin event
     await logAdminEvent({
-      admin_id: admin.id,
-      event_type: 'subscription_trial_extended',
+      actorType: 'admin',
+      actorId: admin.id,
+      actorEmail: admin.email,
+      eventType: 'admin.subscription_trial_extended',
+      practitionerId: id,
       description: `Extended trial by ${days} days for ${practitioner.name || practitioner.email}`,
-      target_type: 'practitioner',
-      target_id: id,
       metadata: {
         days_added: days,
         new_trial_ends_at: newTrialEndsAt.toISOString(),

@@ -112,11 +112,12 @@ export async function POST(
 
     // Log admin event
     await logAdminEvent({
-      admin_id: admin.id,
-      event_type: 'subscription_refund_issued',
+      actorType: 'admin',
+      actorId: admin.id,
+      actorEmail: admin.email,
+      eventType: 'admin.subscription_refund_issued',
+      practitionerId: id,
       description: `Issued $${(refundAmount / 100).toFixed(2)} refund for ${practitioner.name || practitioner.email}`,
-      target_type: 'practitioner',
-      target_id: id,
       metadata: {
         refund_id: refund.id,
         amount_cents: refundAmount,

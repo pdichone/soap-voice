@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/admin-auth';
 import { createServiceRoleClient } from '@/lib/supabase-server';
 import { PLANS } from '@/lib/stripe';
@@ -33,12 +33,11 @@ export interface SubscriptionDetailResponse {
   stripe_subscription_url: string | null;
 }
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
-
 // GET /api/admin/subscriptions/[id]
-export async function GET(request: Request, { params }: RouteParams) {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
     const admin = await getAdminUser();
     if (!admin) {
@@ -46,7 +45,8 @@ export async function GET(request: Request, { params }: RouteParams) {
     }
 
     const { id } = await params;
-    console.log('[Subscription Detail] ID from params:', id);
+    const requestUrl = request.nextUrl.pathname;
+    console.log('[Subscription Detail] ID from params:', id, 'URL:', requestUrl);
 
     const supabase = createServiceRoleClient();
 
@@ -84,13 +84,14 @@ export async function GET(request: Request, { params }: RouteParams) {
       .single();
 
     if (practitionerError || !practitioner) {
-      console.error('Subscription lookup failed:', { id, error: practitionerError });
+      console.error('Subscription lookup failed:', { id, url: requestUrl, error: practitionerError });
       // Return debug info to help diagnose
       return NextResponse.json(
         {
           error: 'Subscription not found',
           debug: {
             requested_id: id,
+            request_url: requestUrl,
             practitioner_exists: !!anyPractitioner,
             practitioner_deleted: anyPractitioner?.deleted_at || null,
             db_error: practitionerError?.message || null,

@@ -44,7 +44,22 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { id } = await params;
+    // Get ID from params, with URL fallback for robustness
+    let id: string;
+    try {
+      const resolvedParams = await params;
+      id = resolvedParams.id;
+    } catch {
+      // Fallback: extract ID from URL path
+      const url = new URL(request.url);
+      const pathParts = url.pathname.split('/');
+      id = pathParts[pathParts.length - 1];
+    }
+
+    if (!id) {
+      return NextResponse.json({ error: 'Missing subscription ID' }, { status: 400 });
+    }
+
     const supabase = createServiceRoleClient();
 
     // Get practitioner details

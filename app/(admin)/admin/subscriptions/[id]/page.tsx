@@ -334,11 +334,15 @@ export default function SubscriptionDetailPage({
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Sync with Stripe */}
-          {subscription.stripe_subscription_id && (
+          {(subscription.stripe_subscription_id || subscription.stripe_customer_id) && (
             <div className="flex items-center justify-between pb-4 border-b">
               <div>
                 <div className="text-sm font-medium text-slate-700">Sync with Stripe</div>
-                <p className="text-xs text-slate-500">Pull latest subscription status from Stripe</p>
+                <p className="text-xs text-slate-500">
+                  {subscription.stripe_subscription_id
+                    ? 'Pull latest subscription status from Stripe'
+                    : 'Link and sync subscription from Stripe customer'}
+                </p>
               </div>
               <Button
                 onClick={handleSyncStripe}

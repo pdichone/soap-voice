@@ -33,15 +33,34 @@ export async function POST(
       );
     }
 
-    if (!practitioner.stripe_subscription_id) {
+    // Try to find subscription - either by stored ID or by looking up customer's subscriptions
+    let subscription: Awaited<ReturnType<typeof stripe.subscriptions.retrieve>>;
+
+    if (practitioner.stripe_subscription_id) {
+      // Use existing subscription ID
+      subscription = await stripe.subscriptions.retrieve(practitioner.stripe_subscription_id);
+    } else if (practitioner.stripe_customer_id) {
+      // Look up subscription by customer ID
+      const subscriptions = await stripe.subscriptions.list({
+        customer: practitioner.stripe_customer_id,
+        limit: 1,
+        status: 'all',
+      });
+
+      if (subscriptions.data.length === 0) {
+        return NextResponse.json(
+          { error: 'No Stripe subscription found for this customer' },
+          { status: 400 }
+        );
+      }
+
+      subscription = subscriptions.data[0];
+    } else {
       return NextResponse.json(
-        { error: 'No Stripe subscription found for this practitioner' },
+        { error: 'No Stripe customer or subscription ID found' },
         { status: 400 }
       );
     }
-
-    // Fetch subscription from Stripe
-    const subscription = await stripe.subscriptions.retrieve(practitioner.stripe_subscription_id);
 
     // Map Stripe status to billing status
     let billingStatus: string;
@@ -77,6 +96,7 @@ export async function POST(
 
     // Update practitioner with current Stripe data
     const updateData = {
+      stripe_subscription_id: subscription.id, // Always save/update the subscription ID
       subscription_status: subscription.status,
       billing_status: billingStatus,
       current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),

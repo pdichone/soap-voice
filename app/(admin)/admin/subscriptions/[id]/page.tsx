@@ -54,6 +54,7 @@ export default function SubscriptionDetailPage({
   const [subscription, setSubscription] = useState<SubscriptionDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<Record<string, unknown> | null>(null);
 
   // Action states
   const [extendDays, setExtendDays] = useState('7');
@@ -80,10 +81,14 @@ export default function SubscriptionDetailPage({
   async function fetchSubscription() {
     setLoading(true);
     setError(null);
+    setDebugInfo(null);
     try {
       const res = await fetch(`/api/admin/subscriptions/${id}`);
       if (!res.ok) {
         const data = await res.json();
+        if (data.debug) {
+          setDebugInfo(data.debug);
+        }
         throw new Error(data.error || 'Failed to fetch subscription');
       }
       const data = await res.json();
@@ -199,6 +204,14 @@ export default function SubscriptionDetailPage({
         <Card>
           <CardContent className="py-12 text-center">
             <div className="text-red-500">{error || 'Subscription not found'}</div>
+            {debugInfo && (
+              <div className="mt-4 p-4 bg-slate-100 rounded text-left text-xs font-mono">
+                <div className="font-bold text-slate-600 mb-2">Debug Info:</div>
+                <pre className="whitespace-pre-wrap text-slate-700">
+                  {JSON.stringify(debugInfo, null, 2)}
+                </pre>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

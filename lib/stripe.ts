@@ -38,11 +38,11 @@ export const PLANS = {
     priceId: PRICES.founder,
     description: 'Early adopter rate - locked in forever',
     features: [
-      'Unlimited SOAP notes',
-      'Voice transcription',
-      'Client management',
+      'Patient management',
+      'Visit tracking',
       'Referral tracking',
       'Insurance claims tracking',
+      'Payment tracking',
       'PDF exports',
     ],
   },
@@ -52,20 +52,17 @@ export const PLANS = {
     priceId: PRICES.solo,
     description: 'Full access for solo practitioners',
     features: [
-      'Unlimited SOAP notes',
-      'Voice transcription',
-      'Client management',
+      'Patient management',
+      'Visit tracking',
       'Referral tracking',
       'Insurance claims tracking',
+      'Payment tracking',
       'PDF exports',
     ],
   },
 } as const;
 
 export type PlanType = keyof typeof PLANS;
-
-// Trial duration in days
-export const TRIAL_DAYS = 7;
 
 // Subscription status types from Stripe
 export type StripeSubscriptionStatus =
@@ -80,21 +77,5 @@ export type StripeSubscriptionStatus =
 
 // Helper to check if subscription is active
 export function isSubscriptionActive(status: string | null): boolean {
-  return status === 'active' || status === 'trialing';
-}
-
-// Helper to check if trial is expired
-export function isTrialExpired(trialEndsAt: string | null): boolean {
-  if (!trialEndsAt) return false;
-  return new Date(trialEndsAt) < new Date();
-}
-
-// Get days remaining in trial
-export function getTrialDaysRemaining(trialEndsAt: string | null): number {
-  if (!trialEndsAt) return 0;
-  const now = new Date();
-  const endDate = new Date(trialEndsAt);
-  const diffTime = endDate.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  return Math.max(0, diffDays);
+  return status === 'active';
 }

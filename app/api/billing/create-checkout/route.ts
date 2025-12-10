@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import { stripe, PLANS, TRIAL_DAYS, type PlanType } from '@/lib/stripe';
+import { stripe, PLANS, type PlanType } from '@/lib/stripe';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '@/lib/env';
 
 export async function POST(request: NextRequest) {
@@ -94,7 +94,6 @@ export async function POST(request: NextRequest) {
         },
       ],
       subscription_data: {
-        trial_period_days: TRIAL_DAYS,
         metadata: {
           practitioner_id: practitioner.id,
           plan_type: planType,

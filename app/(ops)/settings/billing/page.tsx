@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { PLANS, getTrialDaysRemaining, isSubscriptionActive } from '@/lib/stripe';
+import { PLANS, isSubscriptionActive } from '@/lib/stripe';
 
 interface BillingData {
   plan_type: string;
@@ -92,15 +92,9 @@ function BillingPageContent() {
     }
   }
 
-  const trialDaysRemaining = billing?.trial_ends_at
-    ? getTrialDaysRemaining(billing.trial_ends_at)
-    : 0;
-
   const hasActiveSubscription = billing?.subscription_status
     ? isSubscriptionActive(billing.subscription_status)
     : false;
-
-  const isTrialing = billing?.subscription_status === 'trialing' || billing?.billing_status === 'trial';
 
   if (loading) {
     return (
@@ -145,7 +139,7 @@ function BillingPageContent() {
       )}
 
       {/* Current Status - Enhanced for subscribed users */}
-      {hasActiveSubscription && !isTrialing ? (
+      {hasActiveSubscription ? (
         <Card className="border-2 border-green-200 bg-green-50/50">
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -235,14 +229,9 @@ function BillingPageContent() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-3">
-                  <span className="text-2xl font-bold capitalize">
-                    {billing?.plan_type || 'Trial'}
+                  <span className="text-2xl font-bold">
+                    No Active Subscription
                   </span>
-                  {isTrialing && trialDaysRemaining > 0 && (
-                    <Badge variant="outline" className="text-blue-600 border-blue-600">
-                      {trialDaysRemaining} days left in trial
-                    </Badge>
-                  )}
                   {billing?.billing_status === 'overdue' && (
                     <Badge variant="destructive">Payment Overdue</Badge>
                   )}
@@ -250,13 +239,9 @@ function BillingPageContent() {
                     <Badge variant="secondary">Cancelled</Badge>
                   )}
                 </div>
-
-                {billing?.current_period_end && hasActiveSubscription && (
-                  <p className="text-sm text-slate-500 mt-2">
-                    {isTrialing ? 'Trial ends' : 'Next billing date'}:{' '}
-                    {new Date(billing.current_period_end).toLocaleDateString()}
-                  </p>
-                )}
+                <p className="text-sm text-slate-500 mt-2">
+                  Choose a plan below to get started
+                </p>
               </div>
 
               {billing?.stripe_customer_id && (
@@ -274,11 +259,9 @@ function BillingPageContent() {
       )}
 
       {/* Pricing Plans */}
-      {(!hasActiveSubscription || isTrialing) && (
+      {!hasActiveSubscription && (
         <div>
-          <h2 className="text-xl font-semibold mb-4">
-            {isTrialing ? 'Choose a plan before your trial ends' : 'Choose a Plan'}
-          </h2>
+          <h2 className="text-xl font-semibold mb-4">Choose a Plan</h2>
 
           <div className="grid md:grid-cols-2 gap-6">
             {/* Founder Plan */}
@@ -390,10 +373,10 @@ function BillingPageContent() {
             </p>
           </div>
           <div>
-            <h3 className="font-medium">What happens after my trial ends?</h3>
+            <h3 className="font-medium">What&apos;s the difference between plans?</h3>
             <p className="text-sm text-slate-600">
-              After your 7-day trial, you&apos;ll need to choose a plan to continue using ZenLeef.
-              Your data will be preserved.
+              The Founder plan is our early adopter rate - $29/month locked in forever.
+              The Solo plan is $39/month. Both plans include all features.
             </p>
           </div>
         </CardContent>

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/admin-auth';
 import { createServiceRoleClient } from '@/lib/supabase-server';
 import { PLANS } from '@/lib/stripe';
@@ -33,42 +33,20 @@ export interface SubscriptionDetailResponse {
   stripe_subscription_url: string | null;
 }
 
+interface RouteParams {
+  params: Promise<{ id: string }>;
+}
+
 // GET /api/admin/subscriptions/[id]
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(request: Request, { params }: RouteParams) {
   try {
     const admin = await getAdminUser();
     if (!admin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Debug: Log incoming request info
-    const url = new URL(request.url);
-    console.log('[Subscription Detail] Request URL:', request.url);
-    console.log('[Subscription Detail] Pathname:', url.pathname);
-
-    // Get ID from params, with URL fallback for robustness
-    let id: string;
-    let idSource = 'params';
-    try {
-      const resolvedParams = await params;
-      id = resolvedParams.id;
-      console.log('[Subscription Detail] ID from params:', id);
-    } catch {
-      // Fallback: extract ID from URL path
-      idSource = 'url_fallback';
-      const pathParts = url.pathname.split('/');
-      id = pathParts[pathParts.length - 1];
-      console.log('[Subscription Detail] ID from URL fallback:', id, 'path parts:', pathParts);
-    }
-
-    if (!id) {
-      return NextResponse.json({ error: 'Missing subscription ID', debug: { url: request.url, pathname: url.pathname } }, { status: 400 });
-    }
-
-    console.log('[Subscription Detail] Using ID:', id, 'from:', idSource);
+    const { id } = await params;
+    console.log('[Subscription Detail] ID from params:', id);
 
     const supabase = createServiceRoleClient();
 
@@ -96,20 +74,10 @@ export async function GET(
       .is('deleted_at', null)
       .single();
 
-    console.log('[Subscription Detail] Query result:', { practitioner: !!practitioner, error: practitionerError });
-
     if (practitionerError || !practitioner) {
-      console.error('Subscription lookup failed:', { id, idSource, error: practitionerError });
+      console.error('Subscription lookup failed:', { id, error: practitionerError });
       return NextResponse.json(
-        {
-          error: 'Subscription not found',
-          debug: {
-            id,
-            idSource,
-            url: request.url,
-            dbError: practitionerError?.message || null
-          }
-        },
+        { error: 'Subscription not found' },
         { status: 404 }
       );
     }

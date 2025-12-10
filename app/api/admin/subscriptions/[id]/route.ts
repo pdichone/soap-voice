@@ -74,8 +74,22 @@ export async function GET(
       .single();
 
     if (practitionerError || !practitioner) {
+      console.error('Subscription lookup failed:', {
+        id,
+        error: practitionerError,
+        paramsType: typeof params,
+        paramsKeys: Object.keys(params),
+        resolvedId: id
+      });
       return NextResponse.json(
-        { error: 'Subscription not found' },
+        {
+          error: 'Subscription not found',
+          debug: {
+            receivedId: id,
+            dbError: practitionerError?.message || null,
+            paramsType: typeof params,
+          }
+        },
         { status: 404 }
       );
     }

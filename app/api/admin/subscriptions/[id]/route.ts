@@ -50,7 +50,16 @@ export async function GET(request: Request, { params }: RouteParams) {
 
     const supabase = createServiceRoleClient();
 
-    // Get practitioner details
+    // First, check if practitioner exists at all (including deleted)
+    const { data: anyPractitioner, error: anyError } = await supabase
+      .from('practitioners')
+      .select('id, name, email, deleted_at')
+      .eq('id', id)
+      .maybeSingle();
+
+    console.log('[Subscription Detail] Any practitioner check:', { found: !!anyPractitioner, deleted_at: anyPractitioner?.deleted_at, error: anyError });
+
+    // Get practitioner details (excluding soft-deleted)
     const { data: practitioner, error: practitionerError } = await supabase
       .from('practitioners')
       .select(`
@@ -76,8 +85,18 @@ export async function GET(request: Request, { params }: RouteParams) {
 
     if (practitionerError || !practitioner) {
       console.error('Subscription lookup failed:', { id, error: practitionerError });
+      // Return debug info to help diagnose
       return NextResponse.json(
-        { error: 'Subscription not found' },
+        {
+          error: 'Subscription not found',
+          debug: {
+            requested_id: id,
+            practitioner_exists: !!anyPractitioner,
+            practitioner_deleted: anyPractitioner?.deleted_at || null,
+            db_error: practitionerError?.message || null,
+            db_error_code: practitionerError?.code || null
+          }
+        },
         { status: 404 }
       );
     }

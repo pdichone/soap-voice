@@ -36,7 +36,7 @@ export interface SubscriptionDetailResponse {
 // GET /api/admin/subscriptions/[id]
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const admin = await getAdminUser();
@@ -44,9 +44,7 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Handle both Promise and non-Promise params for Next.js 14 compatibility
-    const resolvedParams = 'then' in params ? await params : params;
-    const { id } = resolvedParams;
+    const { id } = await params;
     const supabase = createServiceRoleClient();
 
     // Get practitioner details
@@ -74,22 +72,9 @@ export async function GET(
       .single();
 
     if (practitionerError || !practitioner) {
-      console.error('Subscription lookup failed:', {
-        id,
-        error: practitionerError,
-        paramsType: typeof params,
-        paramsKeys: Object.keys(params),
-        resolvedId: id
-      });
+      console.error('Subscription lookup failed:', { id, error: practitionerError });
       return NextResponse.json(
-        {
-          error: 'Subscription not found',
-          debug: {
-            receivedId: id,
-            dbError: practitionerError?.message || null,
-            paramsType: typeof params,
-          }
-        },
+        { error: 'Subscription not found' },
         { status: 404 }
       );
     }

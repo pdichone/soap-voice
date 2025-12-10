@@ -36,7 +36,7 @@ export interface SubscriptionDetailResponse {
 // GET /api/admin/subscriptions/[id]
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> | { id: string } }
 ) {
   try {
     const admin = await getAdminUser();
@@ -44,7 +44,9 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { id } = await params;
+    // Handle both Promise and non-Promise params for Next.js 14 compatibility
+    const resolvedParams = 'then' in params ? await params : params;
+    const { id } = resolvedParams;
     const supabase = createServiceRoleClient();
 
     // Get practitioner details

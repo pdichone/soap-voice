@@ -7,7 +7,6 @@ export interface SubscriptionDetailResponse {
   id: string;
   name: string;
   email: string;
-  phone: string | null;
   subscription_status: string | null;
   plan_type: string | null;
   monthly_price: number | null;
@@ -66,7 +65,6 @@ export async function GET(
         id,
         name,
         email,
-        phone,
         subscription_status,
         plan_type,
         monthly_price,
@@ -161,7 +159,6 @@ export async function GET(
       id: practitioner.id,
       name: practitioner.name || 'Unknown',
       email: practitioner.email || '',
-      phone: practitioner.phone,
       subscription_status: practitioner.subscription_status,
       plan_type: practitioner.plan_type,
       monthly_price,

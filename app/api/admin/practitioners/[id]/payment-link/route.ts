@@ -6,6 +6,28 @@ import { logAdminEvent } from '@/lib/db/admin-queries';
 import { stripe, PRICES, PLANS } from '@/lib/stripe';
 import type { GeneratePaymentLinkRequest, PaymentLink } from '@/lib/types-billing';
 
+// Helper to get the correct base URL for Stripe redirects
+// Priority: NEXT_PUBLIC_APP_URL > VERCEL_URL > request host
+function getBaseUrl(request: NextRequest): string {
+  // 1. Explicit app URL (set in env for production/preview)
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL;
+  }
+
+  // 2. Vercel's automatic deployment URL (works for preview deploys)
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  // 3. Fallback to request headers (for self-hosted or other platforms)
+  // Use x-forwarded-host if behind a proxy, otherwise use host header
+  const forwardedHost = request.headers.get('x-forwarded-host');
+  const host = forwardedHost || request.headers.get('host') || 'localhost:3000';
+  const protocol = request.headers.get('x-forwarded-proto') || (host.includes('localhost') ? 'http' : 'https');
+
+  return `${protocol}://${host}`;
+}
+
 // GET /api/admin/practitioners/[id]/payment-link - Get existing payment links
 export async function GET(
   request: NextRequest,
@@ -123,12 +145,12 @@ export async function POST(
       );
     }
 
-    // Build the success and cancel URLs dynamically from the request
-    const host = request.headers.get('host') || 'localhost:3000';
-    const protocol = host.includes('localhost') ? 'http' : 'https';
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${protocol}://${host}`;
+    // Build the success and cancel URLs using the helper function
+    const baseUrl = getBaseUrl(request);
     const successUrl = `${baseUrl}/welcome?session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${baseUrl}/admin/practitioners/${id}`;
+
+    console.log('[Payment Link] Using baseUrl:', baseUrl);
 
     // Create Stripe checkout session params
     const sessionParams: Stripe.Checkout.SessionCreateParams = {

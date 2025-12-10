@@ -123,8 +123,10 @@ export async function POST(
       );
     }
 
-    // Build the success and cancel URLs
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    // Build the success and cancel URLs dynamically from the request
+    const host = request.headers.get('host') || 'localhost:3000';
+    const protocol = host.includes('localhost') ? 'http' : 'https';
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${protocol}://${host}`;
     const successUrl = `${baseUrl}/welcome?session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${baseUrl}/admin/practitioners/${id}`;
 

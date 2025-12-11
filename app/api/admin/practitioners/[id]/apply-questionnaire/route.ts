@@ -112,6 +112,73 @@ export async function POST(
       );
     }
 
+    // Also update the practices table if the user has one (for Settings page)
+    if (practitioner.user_id) {
+      // Find the practice_id from the user's profile
+      const { data: profile } = await adminClient
+        .from('profiles')
+        .select('practice_id')
+        .eq('id', practitioner.user_id)
+        .single();
+
+      if (profile?.practice_id) {
+        // Get current practice settings
+        const { data: currentPractice } = await adminClient
+          .from('practices')
+          .select('settings, practice_type')
+          .eq('id', profile.practice_id)
+          .single();
+
+        const currentSettings = (currentPractice?.settings || {}) as Record<string, unknown>;
+
+        // Build updated settings
+        const updatedSettings: Record<string, unknown> = {
+          ...currentSettings,
+        };
+
+        if (questionnaire.practice_name) {
+          updatedSettings.business_name = questionnaire.practice_name;
+        }
+
+        if (questionnaire.address) {
+          if (questionnaire.address.street) {
+            updatedSettings.address_line1 = questionnaire.address.street;
+          }
+          if (questionnaire.address.city) {
+            updatedSettings.city = questionnaire.address.city;
+          }
+          if (questionnaire.address.state) {
+            updatedSettings.state = questionnaire.address.state;
+          }
+          if (questionnaire.address.zip) {
+            updatedSettings.zip = questionnaire.address.zip;
+          }
+        }
+
+        // Update practices table
+        const practiceUpdate: Record<string, unknown> = {
+          settings: updatedSettings,
+          updated_at: new Date().toISOString(),
+        };
+
+        if (questionnaire.practice_type) {
+          practiceUpdate.practice_type = questionnaire.practice_type;
+        }
+
+        const { error: practiceError } = await adminClient
+          .from('practices')
+          .update(practiceUpdate)
+          .eq('id', profile.practice_id);
+
+        if (practiceError) {
+          console.error('Error updating practice:', practiceError);
+          // Don't fail the whole request - practitioner was updated successfully
+        } else {
+          console.log('Practice updated successfully');
+        }
+      }
+    }
+
     // Update onboarding checklist to mark practice_configured as true
     const { data: currentPractitioner } = await adminClient
       .from('practitioners')

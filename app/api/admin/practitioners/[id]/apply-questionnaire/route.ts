@@ -1,6 +1,13 @@
 import { createServiceRoleClient } from '@/lib/supabase-server';
 import { NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/admin-auth';
+import { INSURANCE_PORTALS } from '@/lib/onboarding-constants';
+
+// Helper to convert portal value to label
+function getPortalLabel(value: string): string {
+  const portal = INSURANCE_PORTALS.find(p => p.value === value);
+  return portal?.label || value;
+}
 
 // POST: Apply questionnaire data to practitioner settings
 export async function POST(
@@ -190,7 +197,9 @@ export async function POST(
           const existingNames = new Set((existingPortals || []).map(p => p.name.toLowerCase()));
 
           // Only add portals that don't already exist
+          // Convert values to labels (e.g., "office_ally" -> "Office Ally")
           const newPortals = questionnaire.insurance_portals
+            .map((portalValue: string) => getPortalLabel(portalValue))
             .filter((portalName: string) => !existingNames.has(portalName.toLowerCase()))
             .map((portalName: string, index: number) => ({
               practice_id: profile.practice_id,

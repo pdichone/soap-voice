@@ -16,6 +16,19 @@ export interface Practice {
   updated_at: string;
 }
 
+// Service configuration from onboarding
+export interface ServiceConfig {
+  name: string;
+  duration_minutes: number;
+  price_cents: number;
+}
+
+// Intake preferences from onboarding
+export interface IntakePreferencesConfig {
+  focus_areas?: string[];
+  custom_questions?: string[];
+}
+
 export interface PracticeSettings {
   // Practice branding for PDFs and documents
   business_name?: string;
@@ -27,6 +40,14 @@ export interface PracticeSettings {
   zip?: string;
   phone?: string;
   website?: string;
+
+  // From onboarding questionnaire
+  services?: ServiceConfig[];
+  specialties?: string[];
+  insurance_payers?: string[];
+  insurance_portals?: string[];
+  intake_preferences?: IntakePreferencesConfig;
+
   // Future extensibility for practice-specific settings
   [key: string]: unknown;
 }

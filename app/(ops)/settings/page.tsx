@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import type { PracticeSettings } from '@/lib/types-ops';
+import type { PracticeSettings, ServiceConfig } from '@/lib/types-ops';
 
 // Practice type display configuration (read-only for users)
 const PRACTICE_TYPE_INFO = {
@@ -87,6 +87,10 @@ export default function SettingsPage() {
   });
   const [uploadingLogo, setUploadingLogo] = useState(false);
 
+  // Onboarding data from questionnaire
+  const [services, setServices] = useState<ServiceConfig[]>([]);
+  const [specialties, setSpecialties] = useState<string[]>([]);
+
   useEffect(() => {
     loadProfile();
     // Refresh data when page becomes visible (user navigates back)
@@ -137,6 +141,14 @@ export default function SettingsPage() {
             zip: settings.zip || '',
             phone: settings.phone || '',
           });
+
+          // Load onboarding questionnaire data
+          if (settings.services) {
+            setServices(settings.services);
+          }
+          if (settings.specialties) {
+            setSpecialties(settings.specialties);
+          }
         }
       }
     }
@@ -572,6 +584,68 @@ export default function SettingsPage() {
             >
               {savingPracticeInfo ? 'Saving...' : 'Save Practice Info'}
             </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Services - From Onboarding (Read Only) */}
+      {services.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Your Services</CardTitle>
+            <CardDescription>
+              Services configured from your onboarding questionnaire
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {services.map((service, index) => (
+                <div
+                  key={index}
+                  className="flex items-center justify-between bg-gray-50 p-3 rounded-lg"
+                >
+                  <div>
+                    <span className="font-medium text-gray-900">{service.name}</span>
+                    <span className="text-gray-500 text-sm ml-2">
+                      ({service.duration_minutes} min)
+                    </span>
+                  </div>
+                  <span className="font-semibold text-gray-900">
+                    ${(service.price_cents / 100).toFixed(2)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-3">
+              Contact support to update your service offerings.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Specialties - From Onboarding (Read Only) */}
+      {specialties.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Your Specialties</CardTitle>
+            <CardDescription>
+              Massage modalities you offer
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {specialties.map((specialty, index) => (
+                <span
+                  key={index}
+                  className="inline-flex items-center px-3 py-1 bg-primary/10 text-primary text-sm rounded-full capitalize"
+                >
+                  {specialty.replace(/_/g, ' ')}
+                </span>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-3">
+              Contact support to update your specialties.
+            </p>
           </CardContent>
         </Card>
       )}

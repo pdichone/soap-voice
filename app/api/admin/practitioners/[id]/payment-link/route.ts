@@ -177,7 +177,7 @@ export async function POST(
 
     // Build the success and cancel URLs using the helper function
     const baseUrl = getBaseUrl(request);
-    const successUrl = `${baseUrl}/welcome?session_id={CHECKOUT_SESSION_ID}`;
+    const successUrl = `${baseUrl}/dashboard?payment=success&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${baseUrl}/admin/practitioners/${id}`;
 
     console.log('[Payment Link] Using baseUrl:', baseUrl);

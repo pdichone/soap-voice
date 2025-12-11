@@ -14,7 +14,7 @@ const supabaseAdmin = createClient(
 // Helper function to link practitioner record to user
 async function linkPractitioner(user: User, supabase: ReturnType<typeof createServerClient>) {
   try {
-    // Check if therapist profile exists, create if not
+    // Check if therapist profile exists, create if not (legacy support)
     const { data: therapist } = await supabase
       .from('therapists')
       .select('id')
@@ -31,11 +31,16 @@ async function linkPractitioner(user: User, supabase: ReturnType<typeof createSe
 
     // Link practitioner record to user if exists (for admin-created accounts)
     if (user.email) {
+      const userEmail = user.email.toLowerCase();
+
+      // First, try to find an unlinked practitioner by email (admin-created)
+      // Must not be deleted and must not already have a user_id
       const { data: practitioner } = await supabaseAdmin
         .from('practitioners')
         .select('id, user_id')
-        .eq('email', user.email.toLowerCase())
+        .ilike('email', userEmail) // Case-insensitive match
         .is('user_id', null)
+        .is('deleted_at', null) // Exclude soft-deleted practitioners
         .single();
 
       if (practitioner) {
@@ -44,6 +49,7 @@ async function linkPractitioner(user: User, supabase: ReturnType<typeof createSe
           .from('practitioners')
           .update({
             user_id: user.id,
+            email: userEmail, // Normalize email case
             status: 'active',
             last_login_at: new Date().toISOString(),
             login_count: 1,
@@ -55,36 +61,79 @@ async function linkPractitioner(user: User, supabase: ReturnType<typeof createSe
         await supabaseAdmin.from('admin_events').insert({
           actor_type: 'practitioner',
           actor_id: user.id,
-          actor_email: user.email,
+          actor_email: userEmail,
           event_type: 'practitioner.first_login',
           event_category: 'practitioner',
           practitioner_id: practitioner.id,
-          description: `First login for ${user.email}`,
+          description: `First login for ${userEmail}`,
           metadata: {
             linked_at: new Date().toISOString(),
           },
         });
 
         console.log('Linked practitioner:', practitioner.id, 'to user:', user.id);
-      } else {
-        // Update last login for existing (already linked) practitioner
-        const { data: existingPractitioner } = await supabaseAdmin
+        return; // Done - practitioner was linked
+      }
+
+      // Check if user already has a linked practitioner
+      const { data: existingPractitioner } = await supabaseAdmin
+        .from('practitioners')
+        .select('id, login_count')
+        .eq('user_id', user.id)
+        .is('deleted_at', null)
+        .single();
+
+      if (existingPractitioner) {
+        // Update last login for existing practitioner
+        await supabaseAdmin
           .from('practitioners')
-          .select('id, login_count')
-          .eq('user_id', user.id)
-          .single();
+          .update({
+            last_login_at: new Date().toISOString(),
+            login_count: (existingPractitioner.login_count || 0) + 1,
+          })
+          .eq('id', existingPractitioner.id);
 
-        if (existingPractitioner) {
-          await supabaseAdmin
-            .from('practitioners')
-            .update({
-              last_login_at: new Date().toISOString(),
-              login_count: (existingPractitioner.login_count || 0) + 1,
-            })
-            .eq('id', existingPractitioner.id);
+        console.log('Updated login count for practitioner:', existingPractitioner.id);
+        return; // Done - existing practitioner updated
+      }
 
-          console.log('Updated login count for practitioner:', existingPractitioner.id);
-        }
+      // No practitioner found - auto-create one for self-signup flow
+      // This ensures all users have a practitioner record
+      console.log('No practitioner found, creating new one for:', userEmail);
+
+      const { data: newPractitioner, error: createError } = await supabaseAdmin
+        .from('practitioners')
+        .insert({
+          user_id: user.id,
+          email: userEmail,
+          name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Practitioner',
+          status: 'active',
+          plan_type: 'trial',
+          billing_status: 'trial',
+          last_login_at: new Date().toISOString(),
+          login_count: 1,
+        })
+        .select('id')
+        .single();
+
+      if (createError) {
+        console.error('Error creating practitioner:', createError);
+      } else {
+        console.log('Created new practitioner:', newPractitioner?.id, 'for user:', user.id);
+
+        // Log the signup event
+        await supabaseAdmin.from('admin_events').insert({
+          actor_type: 'practitioner',
+          actor_id: user.id,
+          actor_email: userEmail,
+          event_type: 'practitioner.self_signup',
+          event_category: 'practitioner',
+          practitioner_id: newPractitioner?.id,
+          description: `Self-signup for ${userEmail}`,
+          metadata: {
+            created_at: new Date().toISOString(),
+          },
+        });
       }
     }
   } catch (err) {

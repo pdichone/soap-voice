@@ -19,6 +19,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { formatDate } from '@/lib/date-utils';
+import { PaymentSuccessBanner } from '@/components/ops/PaymentSuccessBanner';
+import { Suspense } from 'react';
 
 // Helper to get greeting based on time of day
 function getGreeting(): string {
@@ -84,6 +86,11 @@ export default async function DashboardPage() {
 
   return (
     <div className="p-4 space-y-6 max-w-7xl mx-auto">
+      {/* Payment Success Banner (client component) */}
+      <Suspense fallback={null}>
+        <PaymentSuccessBanner />
+      </Suspense>
+
       {/* Header with Greeting and Action Buttons */}
       <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div className="flex-1 min-w-0">

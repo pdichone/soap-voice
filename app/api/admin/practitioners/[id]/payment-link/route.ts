@@ -194,6 +194,8 @@ export async function POST(
       ],
       success_url: successUrl,
       cancel_url: cancelUrl,
+      // Allow customers to enter promotion/coupon codes at checkout
+      allow_promotion_codes: true,
       metadata: {
         practitioner_id: id,
         plan_type,

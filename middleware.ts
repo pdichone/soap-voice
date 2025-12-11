@@ -44,8 +44,13 @@ export async function middleware(request: NextRequest) {
     return supabaseResponse;
   }
 
+  // Admin routes use their own cookie-based auth, skip Supabase auth check
+  if (request.nextUrl.pathname.startsWith('/admin')) {
+    return supabaseResponse;
+  }
+
   // Public routes that don't require auth
-  const publicRoutes = ['/login', '/auth/callback', '/auth/confirm', '/admin/login', '/intake'];
+  const publicRoutes = ['/login', '/auth/callback', '/auth/confirm', '/intake'];
   const isPublicRoute = publicRoutes.some(route =>
     request.nextUrl.pathname.startsWith(route)
   );

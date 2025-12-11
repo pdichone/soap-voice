@@ -7,6 +7,9 @@ const SUPABASE_ANON_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_ANON ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
+// Cookie name for impersonation (must match lib/admin-auth.ts)
+const IMPERSONATION_COOKIE = 'impersonating_practitioner_id';
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -39,6 +42,10 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Check for admin impersonation cookie
+  const impersonationCookie = request.cookies.get(IMPERSONATION_COOKIE);
+  const isImpersonating = !!impersonationCookie?.value;
+
   // Skip auth check for API routes (they handle their own auth)
   if (request.nextUrl.pathname.startsWith('/api/')) {
     return supabaseResponse;
@@ -55,7 +62,8 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname.startsWith(route)
   );
 
-  if (!user && !isPublicRoute) {
+  // Allow access if user is logged in OR admin is impersonating
+  if (!user && !isImpersonating && !isPublicRoute) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
@@ -68,7 +76,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Redirect root to dashboard for ops mode
-  if (user && request.nextUrl.pathname === '/') {
+  if ((user || isImpersonating) && request.nextUrl.pathname === '/') {
     const url = request.nextUrl.clone();
     url.pathname = '/dashboard';
     return NextResponse.redirect(url);

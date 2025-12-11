@@ -68,10 +68,8 @@ export async function POST(
       practitionerUpdate.practice_type = questionnaire.practice_type;
     }
 
-    // Apply timezone if provided
-    if (questionnaire.timezone) {
-      practitionerUpdate.timezone = questionnaire.timezone;
-    }
+    // Note: timezone is stored in the questionnaire but practitioners table
+    // doesn't have a timezone column yet - it's on the practices table
 
     // Update practitioner record
     const { error: updateError } = await adminClient
@@ -132,7 +130,6 @@ export async function POST(
       applied: {
         workspace_name: questionnaire.practice_name,
         practice_type: questionnaire.practice_type,
-        timezone: questionnaire.timezone,
         services_count: questionnaire.services?.length || 0,
       },
     });

@@ -318,7 +318,7 @@ export function QuestionnaireResponsesModal({
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
                   Apply the questionnaire responses to this practitioner&apos;s account settings.
-                  This will update their practice name, practice type, and timezone.
+                  This will update their practice name and practice type.
                 </p>
                 <Button
                   onClick={handleApplySettings}

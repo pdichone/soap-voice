@@ -36,14 +36,17 @@ export async function POST(
     }
 
     // Get the site URL for the redirect
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+    // Priority: NEXT_PUBLIC_APP_URL > NEXT_PUBLIC_SITE_URL > localhost
+    const siteUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
     // Use Supabase Admin to send magic link
     // inviteUserByEmail creates the user AND sends the email
+    // Use /auth/callback (server-side) instead of /auth/confirm (client-side)
+    // because callback properly handles the code/token_hash from query params
     const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       practitioner.email,
       {
-        redirectTo: `${siteUrl}/auth/confirm`,
+        redirectTo: `${siteUrl}/auth/callback`,
         data: {
           practitioner_id: practitioner.id,
           name: practitioner.name,
@@ -58,7 +61,7 @@ export async function POST(
         type: 'magiclink',
         email: practitioner.email,
         options: {
-          redirectTo: `${siteUrl}/auth/confirm`,
+          redirectTo: `${siteUrl}/auth/callback`,
         },
       });
 
@@ -106,7 +109,7 @@ export async function POST(
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email: practitioner.email,
         options: {
-          emailRedirectTo: `${siteUrl}/auth/confirm`,
+          emailRedirectTo: `${siteUrl}/auth/callback`,
         },
       });
 

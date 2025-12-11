@@ -39,6 +39,11 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Skip auth check for API routes (they handle their own auth)
+  if (request.nextUrl.pathname.startsWith('/api/')) {
+    return supabaseResponse;
+  }
+
   // Public routes that don't require auth
   const publicRoutes = ['/login', '/auth/callback', '/auth/confirm', '/admin/login', '/intake'];
   const isPublicRoute = publicRoutes.some(route =>

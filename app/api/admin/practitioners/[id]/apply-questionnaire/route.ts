@@ -122,18 +122,56 @@ export async function POST(
     // Also update the practices table if the user has one (for Settings page)
     if (practitioner.user_id) {
       // Find the practice_id from the user's profile
-      const { data: profile } = await adminClient
+      const { data: profile, error: profileError } = await adminClient
         .from('profiles')
         .select('practice_id')
         .eq('id', practitioner.user_id)
         .single();
 
-      if (profile?.practice_id) {
+      console.log('Profile lookup:', { user_id: practitioner.user_id, practice_id: profile?.practice_id, error: profileError });
+
+      let practiceId = profile?.practice_id;
+
+      // If no practice exists, create one
+      if (!practiceId) {
+        console.log('No practice found, creating one...');
+
+        const { data: newPractice, error: createError } = await adminClient
+          .from('practices')
+          .insert({
+            name: questionnaire.practice_name || 'My Practice',
+            practice_type: questionnaire.practice_type || 'cash_only',
+            settings: {},
+          })
+          .select('id')
+          .single();
+
+        if (createError) {
+          console.error('Error creating practice:', createError);
+        } else if (newPractice) {
+          practiceId = newPractice.id;
+          console.log('Created new practice:', practiceId);
+
+          // Link practice to profile
+          const { error: linkError } = await adminClient
+            .from('profiles')
+            .update({ practice_id: practiceId })
+            .eq('id', practitioner.user_id);
+
+          if (linkError) {
+            console.error('Error linking practice to profile:', linkError);
+          } else {
+            console.log('Linked practice to profile');
+          }
+        }
+      }
+
+      if (practiceId) {
         // Get current practice settings
         const { data: currentPractice } = await adminClient
           .from('practices')
           .select('settings, practice_type')
-          .eq('id', profile.practice_id)
+          .eq('id', practiceId)
           .single();
 
         const currentSettings = (currentPractice?.settings || {}) as Record<string, unknown>;
@@ -175,7 +213,7 @@ export async function POST(
         const { error: practiceError } = await adminClient
           .from('practices')
           .update(practiceUpdate)
-          .eq('id', profile.practice_id);
+          .eq('id', practiceId);
 
         if (practiceError) {
           console.error('Error updating practice:', practiceError);
@@ -192,7 +230,7 @@ export async function POST(
           const { data: existingPortals } = await adminClient
             .from('portals')
             .select('name')
-            .eq('practice_id', profile.practice_id);
+            .eq('practice_id', practiceId);
 
           const existingNames = new Set((existingPortals || []).map(p => p.name.toLowerCase()));
 
@@ -202,7 +240,7 @@ export async function POST(
             .map((portalValue: string) => getPortalLabel(portalValue))
             .filter((portalName: string) => !existingNames.has(portalName.toLowerCase()))
             .map((portalName: string, index: number) => ({
-              practice_id: profile.practice_id,
+              practice_id: practiceId,
               name: portalName,
               sort_order: (existingPortals?.length || 0) + index + 1,
               is_active: true,
@@ -229,7 +267,7 @@ export async function POST(
           const { data: freshPractice } = await adminClient
             .from('practices')
             .select('settings')
-            .eq('id', profile.practice_id)
+            .eq('id', practiceId)
             .single();
 
           const settingsWithServices = {
@@ -240,7 +278,7 @@ export async function POST(
           await adminClient
             .from('practices')
             .update({ settings: settingsWithServices })
-            .eq('id', profile.practice_id);
+            .eq('id', practiceId);
         }
 
         // Store insurance payers in practice settings if provided
@@ -250,7 +288,7 @@ export async function POST(
           const { data: freshPractice } = await adminClient
             .from('practices')
             .select('settings')
-            .eq('id', profile.practice_id)
+            .eq('id', practiceId)
             .single();
 
           const settingsWithPayers = {
@@ -261,7 +299,7 @@ export async function POST(
           await adminClient
             .from('practices')
             .update({ settings: settingsWithPayers })
-            .eq('id', profile.practice_id);
+            .eq('id', practiceId);
         }
 
         // Store intake preferences in practice settings if provided
@@ -271,7 +309,7 @@ export async function POST(
           const { data: freshPractice } = await adminClient
             .from('practices')
             .select('settings')
-            .eq('id', profile.practice_id)
+            .eq('id', practiceId)
             .single();
 
           const settingsWithIntake = {
@@ -282,7 +320,7 @@ export async function POST(
           await adminClient
             .from('practices')
             .update({ settings: settingsWithIntake })
-            .eq('id', profile.practice_id);
+            .eq('id', practiceId);
         }
 
         // Store specialties in practice settings if provided
@@ -292,7 +330,7 @@ export async function POST(
           const { data: freshPractice } = await adminClient
             .from('practices')
             .select('settings')
-            .eq('id', profile.practice_id)
+            .eq('id', practiceId)
             .single();
 
           const settingsWithSpecialties = {
@@ -303,7 +341,7 @@ export async function POST(
           await adminClient
             .from('practices')
             .update({ settings: settingsWithSpecialties })
-            .eq('id', profile.practice_id);
+            .eq('id', practiceId);
         }
       }
     }

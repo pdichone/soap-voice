@@ -317,10 +317,9 @@ export function OnboardingSection({
           practitionerName={practitionerName}
           practitionerId={practitionerId}
           onSettingsApplied={() => {
-            // Refresh the page to show updated data after a short delay
-            setTimeout(() => {
-              window.location.reload();
-            }, 1500);
+            // Don't auto-refresh - let user manually refresh to see changes
+            // This allows time to check console logs
+            console.log('Settings applied - refresh page to see changes');
           }}
         />
       )}

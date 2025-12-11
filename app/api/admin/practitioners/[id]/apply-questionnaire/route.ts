@@ -385,9 +385,35 @@ export async function POST(
       },
     });
 
+    // Check if practice was updated
+    let practiceUpdated = false;
+    let practiceIdUsed: string | null = null;
+
+    if (practitioner.user_id) {
+      const { data: finalProfile } = await adminClient
+        .from('profiles')
+        .select('practice_id')
+        .eq('id', practitioner.user_id)
+        .single();
+
+      if (finalProfile?.practice_id) {
+        practiceIdUsed = finalProfile.practice_id;
+        const { data: finalPractice } = await adminClient
+          .from('practices')
+          .select('settings')
+          .eq('id', finalProfile.practice_id)
+          .single();
+
+        practiceUpdated = !!(finalPractice?.settings);
+        console.log('Final practice settings:', finalPractice?.settings);
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      message: 'Questionnaire settings applied successfully',
+      message: practiceUpdated
+        ? 'Questionnaire settings applied successfully'
+        : 'Practitioner updated but practice settings may not have been saved (user may not have logged in yet)',
       applied: {
         workspace_name: questionnaire.practice_name,
         practice_type: questionnaire.practice_type,
@@ -398,6 +424,11 @@ export async function POST(
         has_intake_preferences: !!questionnaire.intake_preferences,
       },
       updated_record: updateResult?.[0] || null,
+      debug: {
+        practitioner_user_id: practitioner.user_id,
+        practice_id: practiceIdUsed,
+        practice_updated: practiceUpdated,
+      },
     });
   } catch (error) {
     console.error('Error applying questionnaire:', error);

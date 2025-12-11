@@ -124,11 +124,29 @@ export async function POST(
       // Find the practice_id from the user's profile
       const { data: profile, error: profileError } = await adminClient
         .from('profiles')
-        .select('practice_id')
+        .select('id, practice_id')
         .eq('id', practitioner.user_id)
         .single();
 
-      console.log('Profile lookup:', { user_id: practitioner.user_id, practice_id: profile?.practice_id, error: profileError });
+      console.log('Profile lookup:', { user_id: practitioner.user_id, profile_exists: !!profile, practice_id: profile?.practice_id, error: profileError?.message });
+
+      // If no profile exists, create one
+      if (!profile) {
+        console.log('No profile found, creating one...');
+        const { error: createProfileError } = await adminClient
+          .from('profiles')
+          .insert({
+            id: practitioner.user_id,
+            full_name: questionnaire.practice_name || 'Practitioner',
+            timezone: questionnaire.timezone || 'America/Los_Angeles',
+          });
+
+        if (createProfileError) {
+          console.error('Error creating profile:', createProfileError);
+        } else {
+          console.log('Created profile for user:', practitioner.user_id);
+        }
+      }
 
       let practiceId = profile?.practice_id;
 
@@ -152,11 +170,14 @@ export async function POST(
           practiceId = newPractice.id;
           console.log('Created new practice:', practiceId);
 
-          // Link practice to profile
+          // Link practice to profile (use upsert to handle case where profile was just created)
           const { error: linkError } = await adminClient
             .from('profiles')
-            .update({ practice_id: practiceId })
-            .eq('id', practitioner.user_id);
+            .upsert({
+              id: practitioner.user_id,
+              practice_id: practiceId,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'id' });
 
           if (linkError) {
             console.error('Error linking practice to profile:', linkError);

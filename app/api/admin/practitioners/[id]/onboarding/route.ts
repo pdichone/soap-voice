@@ -1,5 +1,6 @@
-import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase-server';
+import { createServiceRoleClient } from '@/lib/supabase-server';
 import { NextResponse } from 'next/server';
+import { getAdminUser } from '@/lib/admin-auth';
 import type { OnboardingUpdateInput } from '@/lib/types-onboarding';
 
 // PUT: Update practitioner onboarding (admin only)
@@ -9,17 +10,11 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    const supabase = await createServerSupabaseClient();
 
-    // Verify admin access
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    // Verify admin access using cookie-based auth
+    const admin = await getAdminUser();
+    if (!admin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const adminEmails = process.env.ADMIN_EMAILS?.split(',').map(e => e.trim()) || [];
-    if (!adminEmails.includes(user.email || '')) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
     const body: OnboardingUpdateInput = await request.json();

@@ -1,22 +1,15 @@
-import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase-server';
+import { createServiceRoleClient } from '@/lib/supabase-server';
 import { NextResponse } from 'next/server';
+import { getAdminUser } from '@/lib/admin-auth';
 
 // Admin-only endpoint to reset all data for testing
 // WARNING: This deletes ALL data from the database
 export async function DELETE(request: Request) {
   try {
-    const supabase = await createServerSupabaseClient();
-
-    // Verify admin access
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    // Verify admin access using cookie-based auth
+    const admin = await getAdminUser();
+    if (!admin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Check if user is an admin (you might want to check against ADMIN_EMAILS env var)
-    const adminEmails = process.env.ADMIN_EMAILS?.split(',').map(e => e.trim()) || [];
-    if (!adminEmails.includes(user.email || '')) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
     // Require confirmation phrase in body

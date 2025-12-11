@@ -1,5 +1,6 @@
-import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase-server';
+import { createServiceRoleClient } from '@/lib/supabase-server';
 import { NextResponse } from 'next/server';
+import { getAdminUser } from '@/lib/admin-auth';
 
 // GET: Fetch questionnaire for a practitioner (admin only)
 export async function GET(
@@ -8,17 +9,11 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const supabase = await createServerSupabaseClient();
 
-    // Verify admin access
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    // Verify admin access using cookie-based auth
+    const admin = await getAdminUser();
+    if (!admin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const adminEmails = process.env.ADMIN_EMAILS?.split(',').map(e => e.trim()) || [];
-    if (!adminEmails.includes(user.email || '')) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
     // Use service role for querying
@@ -55,17 +50,11 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const supabase = await createServerSupabaseClient();
 
-    // Verify admin access
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    // Verify admin access using cookie-based auth
+    const admin = await getAdminUser();
+    if (!admin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const adminEmails = process.env.ADMIN_EMAILS?.split(',').map(e => e.trim()) || [];
-    if (!adminEmails.includes(user.email || '')) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
     // Use service role for updating

@@ -84,6 +84,13 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   const practitionerId = session.metadata?.practitioner_id;
   const planType = session.metadata?.plan_type;
 
+  console.log('[Checkout] Processing checkout completion:', {
+    practitionerId,
+    planType,
+    sessionId: session.id,
+    subscriptionId: session.subscription,
+  });
+
   if (!practitionerId) {
     console.error('No practitioner_id in checkout session metadata');
     return;
@@ -91,27 +98,46 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
   // Get subscription details
   const subscriptionId = session.subscription as string;
+
+  if (!subscriptionId) {
+    console.error('No subscription ID in checkout session');
+    return;
+  }
+
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
+  console.log('[Checkout] Subscription details:', {
+    status: subscription.status,
+    currentPeriodEnd: subscription.current_period_end,
+    trialEnd: subscription.trial_end,
+  });
+
   // Update practitioner with subscription info
-  const { error } = await supabaseAdmin
+  const updateData = {
+    stripe_subscription_id: subscriptionId,
+    stripe_price_id: subscription.items.data[0].price.id,
+    subscription_status: subscription.status,
+    current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+    plan_type: planType || 'solo',
+    billing_status: subscription.status === 'trialing' ? 'trial' : 'paying',
+    trial_ends_at: subscription.trial_end
+      ? new Date(subscription.trial_end * 1000).toISOString()
+      : null,
+    billing_started_at: new Date().toISOString(),
+  };
+
+  console.log('[Checkout] Updating practitioner:', practitionerId, updateData);
+
+  const { data, error } = await supabaseAdmin
     .from('practitioners')
-    .update({
-      stripe_subscription_id: subscriptionId,
-      stripe_price_id: subscription.items.data[0].price.id,
-      subscription_status: subscription.status,
-      current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-      plan_type: planType || 'solo',
-      billing_status: subscription.status === 'trialing' ? 'trial' : 'paying',
-      trial_ends_at: subscription.trial_end
-        ? new Date(subscription.trial_end * 1000).toISOString()
-        : null,
-      billing_started_at: new Date().toISOString(),
-    })
-    .eq('id', practitionerId);
+    .update(updateData)
+    .eq('id', practitionerId)
+    .select();
 
   if (error) {
     console.error('Error updating practitioner after checkout:', error);
+  } else {
+    console.log('[Checkout] Practitioner updated successfully:', data);
   }
 
   // Mark the payment link as completed
@@ -125,6 +151,8 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
   if (linkError) {
     console.error('Error updating payment link status:', linkError);
+  } else {
+    console.log('[Checkout] Payment link marked as completed');
   }
 }
 

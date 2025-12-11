@@ -106,13 +106,16 @@ export default function SettingsPage() {
   const loadProfile = async () => {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
+    console.log('[Settings] User:', user?.id, user?.email);
     if (!user) return;
 
-    const { data } = await supabase
+    const { data, error: profileError } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', user.id)
       .single();
+
+    console.log('[Settings] Profile:', { data, error: profileError?.message });
 
     if (data) {
       setFullName(data.full_name || '');
@@ -121,16 +124,20 @@ export default function SettingsPage() {
       setReferralWarning(String(data.referral_warning_days || 30));
 
       // Load practice settings if user has a practice
+      console.log('[Settings] Practice ID from profile:', data.practice_id);
       if (data.practice_id) {
         setPracticeId(data.practice_id);
-        const { data: practiceData } = await supabase
+        const { data: practiceData, error: practiceError } = await supabase
           .from('practices')
           .select('settings')
           .eq('id', data.practice_id)
           .single();
 
+        console.log('[Settings] Practice data:', { practiceData, error: practiceError?.message });
+
         if (practiceData?.settings) {
           const settings = practiceData.settings as PracticeSettings;
+          console.log('[Settings] Settings object:', settings);
           setPracticeInfo({
             business_name: settings.business_name || '',
             logo_url: settings.logo_url || '',
@@ -144,9 +151,11 @@ export default function SettingsPage() {
 
           // Load onboarding questionnaire data
           if (settings.services) {
+            console.log('[Settings] Services:', settings.services);
             setServices(settings.services);
           }
           if (settings.specialties) {
+            console.log('[Settings] Specialties:', settings.specialties);
             setSpecialties(settings.specialties);
           }
         }

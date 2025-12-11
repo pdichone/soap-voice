@@ -184,10 +184,38 @@ export async function POST(
           } else {
             console.log('Linked practice to profile');
           }
+
+          // Also add user to practice_users for RLS access
+          const { error: practiceUserError } = await adminClient
+            .from('practice_users')
+            .upsert({
+              practice_id: practiceId,
+              user_id: practitioner.user_id,
+              role: 'admin',
+            }, { onConflict: 'practice_id,user_id' });
+
+          if (practiceUserError) {
+            console.error('Error creating practice_users entry:', practiceUserError);
+          } else {
+            console.log('Added user to practice_users');
+          }
         }
       }
 
       if (practiceId) {
+        // Ensure practice_users entry exists for RLS access (even for existing practices)
+        const { error: ensurePracticeUserError } = await adminClient
+          .from('practice_users')
+          .upsert({
+            practice_id: practiceId,
+            user_id: practitioner.user_id,
+            role: 'admin',
+          }, { onConflict: 'practice_id,user_id' });
+
+        if (ensurePracticeUserError) {
+          console.error('Error ensuring practice_users entry:', ensurePracticeUserError);
+        }
+
         // Get current practice settings
         const { data: currentPractice } = await adminClient
           .from('practices')
@@ -410,6 +438,8 @@ export async function POST(
     let practiceUpdated = false;
     let practiceIdUsed: string | null = null;
 
+    let practiceUsersCount = 0;
+
     if (practitioner.user_id) {
       const { data: finalProfile } = await adminClient
         .from('profiles')
@@ -427,6 +457,16 @@ export async function POST(
 
         practiceUpdated = !!(finalPractice?.settings);
         console.log('Final practice settings:', finalPractice?.settings);
+
+        // Check practice_users for RLS debugging
+        const { data: practiceUsers, count } = await adminClient
+          .from('practice_users')
+          .select('*', { count: 'exact' })
+          .eq('practice_id', finalProfile.practice_id)
+          .eq('user_id', practitioner.user_id);
+
+        practiceUsersCount = count || 0;
+        console.log('Practice users entry:', practiceUsers);
       }
     }
 
@@ -449,6 +489,7 @@ export async function POST(
         practitioner_user_id: practitioner.user_id,
         practice_id: practiceIdUsed,
         practice_updated: practiceUpdated,
+        practice_users_count: practiceUsersCount,
       },
     });
   } catch (error) {

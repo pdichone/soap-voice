@@ -176,6 +176,126 @@ export async function POST(
         } else {
           console.log('Practice updated successfully');
         }
+
+        // Create insurance portals if provided
+        if (questionnaire.insurance_portals && questionnaire.insurance_portals.length > 0) {
+          console.log('Creating portals:', questionnaire.insurance_portals);
+
+          // First, check what portals already exist
+          const { data: existingPortals } = await adminClient
+            .from('portals')
+            .select('name')
+            .eq('practice_id', profile.practice_id);
+
+          const existingNames = new Set((existingPortals || []).map(p => p.name.toLowerCase()));
+
+          // Only add portals that don't already exist
+          const newPortals = questionnaire.insurance_portals
+            .filter((portalName: string) => !existingNames.has(portalName.toLowerCase()))
+            .map((portalName: string, index: number) => ({
+              practice_id: profile.practice_id,
+              name: portalName,
+              sort_order: (existingPortals?.length || 0) + index + 1,
+              is_active: true,
+            }));
+
+          if (newPortals.length > 0) {
+            const { error: portalsError } = await adminClient
+              .from('portals')
+              .insert(newPortals);
+
+            if (portalsError) {
+              console.error('Error creating portals:', portalsError);
+            } else {
+              console.log(`Created ${newPortals.length} new portals`);
+            }
+          }
+        }
+
+        // Store services in practice settings if provided
+        if (questionnaire.services && questionnaire.services.length > 0) {
+          console.log('Storing services:', questionnaire.services);
+
+          // Get fresh practice settings and add services
+          const { data: freshPractice } = await adminClient
+            .from('practices')
+            .select('settings')
+            .eq('id', profile.practice_id)
+            .single();
+
+          const settingsWithServices = {
+            ...((freshPractice?.settings || {}) as Record<string, unknown>),
+            services: questionnaire.services,
+          };
+
+          await adminClient
+            .from('practices')
+            .update({ settings: settingsWithServices })
+            .eq('id', profile.practice_id);
+        }
+
+        // Store insurance payers in practice settings if provided
+        if (questionnaire.insurance_payers && questionnaire.insurance_payers.length > 0) {
+          console.log('Storing insurance payers:', questionnaire.insurance_payers);
+
+          const { data: freshPractice } = await adminClient
+            .from('practices')
+            .select('settings')
+            .eq('id', profile.practice_id)
+            .single();
+
+          const settingsWithPayers = {
+            ...((freshPractice?.settings || {}) as Record<string, unknown>),
+            insurance_payers: questionnaire.insurance_payers,
+          };
+
+          await adminClient
+            .from('practices')
+            .update({ settings: settingsWithPayers })
+            .eq('id', profile.practice_id);
+        }
+
+        // Store intake preferences in practice settings if provided
+        if (questionnaire.intake_preferences) {
+          console.log('Storing intake preferences:', questionnaire.intake_preferences);
+
+          const { data: freshPractice } = await adminClient
+            .from('practices')
+            .select('settings')
+            .eq('id', profile.practice_id)
+            .single();
+
+          const settingsWithIntake = {
+            ...((freshPractice?.settings || {}) as Record<string, unknown>),
+            intake_preferences: questionnaire.intake_preferences,
+          };
+
+          await adminClient
+            .from('practices')
+            .update({ settings: settingsWithIntake })
+            .eq('id', profile.practice_id);
+        }
+
+        // Store specialties in practice settings if provided
+        if (questionnaire.specialties && questionnaire.specialties.length > 0) {
+          console.log('Storing specialties:', questionnaire.specialties);
+
+          const { data: freshPractice } = await adminClient
+            .from('practices')
+            .select('settings')
+            .eq('id', profile.practice_id)
+            .single();
+
+          const settingsWithSpecialties = {
+            ...((freshPractice?.settings || {}) as Record<string, unknown>),
+            specialties: questionnaire.specialties,
+          };
+
+          await adminClient
+            .from('practices')
+            .update({ settings: settingsWithSpecialties })
+            .eq('id', profile.practice_id);
+        }
       }
     }
 
@@ -225,6 +345,10 @@ export async function POST(
         workspace_name: questionnaire.practice_name,
         practice_type: questionnaire.practice_type,
         services_count: questionnaire.services?.length || 0,
+        portals_count: questionnaire.insurance_portals?.length || 0,
+        payers_count: questionnaire.insurance_payers?.length || 0,
+        specialties_count: questionnaire.specialties?.length || 0,
+        has_intake_preferences: !!questionnaire.intake_preferences,
       },
       updated_record: updateResult?.[0] || null,
     });

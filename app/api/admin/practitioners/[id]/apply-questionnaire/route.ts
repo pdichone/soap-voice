@@ -49,7 +49,7 @@ export async function POST(
     // Fetch current practitioner data
     const { data: practitioner, error: practitionerError } = await adminClient
       .from('practitioners')
-      .select('user_id, workspace_name, practice_type')
+      .select('user_id, workspace_name, practice_type, name')
       .eq('id', id)
       .single();
 
@@ -124,11 +124,14 @@ export async function POST(
       // Find the practice_id from the user's profile
       const { data: profile, error: profileError } = await adminClient
         .from('profiles')
-        .select('id, practice_id')
+        .select('id, practice_id, full_name')
         .eq('id', practitioner.user_id)
         .single();
 
       console.log('Profile lookup:', { user_id: practitioner.user_id, profile_exists: !!profile, practice_id: profile?.practice_id, error: profileError?.message });
+
+      // Determine the full_name to use (practitioner name from admin)
+      const fullName = practitioner.name || questionnaire.practice_name || 'Practitioner';
 
       // If no profile exists, create one
       if (!profile) {
@@ -137,7 +140,7 @@ export async function POST(
           .from('profiles')
           .insert({
             id: practitioner.user_id,
-            full_name: questionnaire.practice_name || 'Practitioner',
+            full_name: fullName,
             timezone: questionnaire.timezone || 'America/Los_Angeles',
           });
 
@@ -145,6 +148,34 @@ export async function POST(
           console.error('Error creating profile:', createProfileError);
         } else {
           console.log('Created profile for user:', practitioner.user_id);
+        }
+      } else {
+        // Profile exists - update full_name and timezone if not already set
+        const profileUpdate: Record<string, unknown> = {
+          updated_at: new Date().toISOString(),
+        };
+
+        // Update full_name if it's not set
+        if (!profile.full_name && fullName) {
+          profileUpdate.full_name = fullName;
+        }
+
+        // Update timezone if provided in questionnaire
+        if (questionnaire.timezone) {
+          profileUpdate.timezone = questionnaire.timezone;
+        }
+
+        if (Object.keys(profileUpdate).length > 1) {
+          const { error: updateProfileError } = await adminClient
+            .from('profiles')
+            .update(profileUpdate)
+            .eq('id', practitioner.user_id);
+
+          if (updateProfileError) {
+            console.error('Error updating profile:', updateProfileError);
+          } else {
+            console.log('Updated profile full_name:', fullName);
+          }
         }
       }
 
@@ -476,6 +507,7 @@ export async function POST(
         ? 'Questionnaire settings applied successfully'
         : 'Practitioner updated but practice settings may not have been saved (user may not have logged in yet)',
       applied: {
+        full_name: practitioner.name,
         workspace_name: questionnaire.practice_name,
         practice_type: questionnaire.practice_type,
         services_count: questionnaire.services?.length || 0,

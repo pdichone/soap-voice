@@ -315,6 +315,13 @@ export function OnboardingSection({
           onClose={() => setShowResponsesModal(false)}
           questionnaire={questionnaire}
           practitionerName={practitionerName}
+          practitionerId={practitionerId}
+          onSettingsApplied={() => {
+            // Refresh the page to show updated data after a short delay
+            setTimeout(() => {
+              window.location.reload();
+            }, 1500);
+          }}
         />
       )}
     </>

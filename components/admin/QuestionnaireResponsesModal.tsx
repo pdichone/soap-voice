@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -9,7 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Download, FileText, CheckCircle2, X } from 'lucide-react';
+import { Download, FileText, CheckCircle2, X, Loader2, Settings } from 'lucide-react';
 import type { OnboardingQuestionnaire } from '@/lib/types-onboarding';
 import {
   SPECIALTIES,
@@ -26,6 +27,8 @@ interface QuestionnaireResponsesModalProps {
   onClose: () => void;
   questionnaire: OnboardingQuestionnaire;
   practitionerName: string;
+  practitionerId: string;
+  onSettingsApplied?: () => void;
 }
 
 // Helper to get label from value
@@ -46,12 +49,42 @@ export function QuestionnaireResponsesModal({
   onClose,
   questionnaire,
   practitionerName,
+  practitionerId,
+  onSettingsApplied,
 }: QuestionnaireResponsesModalProps) {
+  const [isApplying, setIsApplying] = useState(false);
+  const [applySuccess, setApplySuccess] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
   const formatPrice = (cents: number): string => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
     }).format(cents / 100);
+  };
+
+  const handleApplySettings = async () => {
+    setIsApplying(true);
+    setApplyError(null);
+
+    try {
+      const response = await fetch(`/api/admin/practitioners/${practitionerId}/apply-questionnaire`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to apply settings');
+      }
+
+      setApplySuccess(true);
+      onSettingsApplied?.();
+    } catch (error) {
+      console.error('Error applying settings:', error);
+      setApplyError(error instanceof Error ? error.message : 'Failed to apply settings');
+    } finally {
+      setIsApplying(false);
+    }
   };
 
   return (
@@ -268,6 +301,45 @@ export function QuestionnaireResponsesModal({
               </p>
             </Section>
           )}
+
+          {/* Apply Settings Button */}
+          <div className="border-t pt-4 mt-4">
+            {applyError && (
+              <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
+                {applyError}
+              </div>
+            )}
+            {applySuccess ? (
+              <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-md text-green-700">
+                <CheckCircle2 className="h-5 w-5" />
+                <span>Settings applied successfully! The page will refresh to show updated data.</span>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Apply the questionnaire responses to this practitioner&apos;s account settings.
+                  This will update their practice name, practice type, and timezone.
+                </p>
+                <Button
+                  onClick={handleApplySettings}
+                  disabled={isApplying}
+                  className="w-full"
+                >
+                  {isApplying ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Applying Settings...
+                    </>
+                  ) : (
+                    <>
+                      <Settings className="h-4 w-4 mr-2" />
+                      Apply Settings to Account
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>

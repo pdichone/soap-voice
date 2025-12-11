@@ -38,8 +38,9 @@ export async function POST(request: Request) {
     return response;
   } catch (error) {
     console.error('Admin login error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'An unexpected error occurred' },
+      { error: `An unexpected error occurred: ${errorMessage}` },
       { status: 500 }
     );
   }

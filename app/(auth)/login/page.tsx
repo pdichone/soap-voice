@@ -113,8 +113,8 @@ function LoginContent() {
     <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gray-50">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">SOAP Voice</h1>
-          <p className="text-gray-600 mt-2">Voice-to-SOAP notes for massage therapists</p>
+          <h1 className="text-3xl font-bold text-gray-900">Zenleef</h1>
+          <p className="text-gray-600 mt-2">Practice management for massage therapists</p>
         </div>
 
         {isDevMode && (

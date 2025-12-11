@@ -30,6 +30,53 @@ function LoginContent() {
       router.replace(`/auth/callback?${params.toString()}`);
       return;
     }
+
+    // Handle invite link with hash fragment (access_token in URL hash)
+    const hash = window.location.hash;
+    if (hash && hash.includes('access_token')) {
+      const handleInviteToken = async () => {
+        setMessage({ type: 'success', text: 'Verifying your account...' });
+
+        // Parse the hash fragment
+        const params = new URLSearchParams(hash.substring(1));
+        const accessToken = params.get('access_token');
+        const refreshToken = params.get('refresh_token');
+
+        if (accessToken && refreshToken) {
+          const supabase = createClient();
+
+          // Set the session from the tokens
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          if (error) {
+            console.error('Error setting session:', error);
+            setMessage({ type: 'error', text: 'Authentication failed: ' + error.message });
+            return;
+          }
+
+          // Session set successfully - now call the server to link practitioner
+          setMessage({ type: 'success', text: 'Setting up your account...' });
+
+          try {
+            await fetch('/api/auth/link-practitioner', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            });
+          } catch (err) {
+            console.error('Error linking practitioner:', err);
+          }
+
+          // Clear the hash and redirect to dashboard
+          window.history.replaceState({}, '', window.location.pathname);
+          router.push('/dashboard');
+        }
+      };
+
+      handleInviteToken();
+    }
   }, [searchParams, router]);
 
   // Auto-login in dev mode

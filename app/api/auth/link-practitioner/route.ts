@@ -100,32 +100,77 @@ export async function POST() {
           linked: true,
           practitionerId: practitioner.id
         });
-      } else {
-        // Check if already linked
-        const { data: existingPractitioner } = await supabaseAdmin
+      }
+
+      // Check if already linked
+      const { data: existingPractitioner } = await supabaseAdmin
+        .from('practitioners')
+        .select('id, login_count')
+        .eq('user_id', user.id)
+        .is('deleted_at', null)
+        .single();
+
+      if (existingPractitioner) {
+        // Update last login
+        await supabaseAdmin
           .from('practitioners')
-          .select('id, login_count')
-          .eq('user_id', user.id)
-          .single();
+          .update({
+            last_login_at: new Date().toISOString(),
+            login_count: (existingPractitioner.login_count || 0) + 1,
+          })
+          .eq('id', existingPractitioner.id);
 
-        if (existingPractitioner) {
-          // Update last login
-          await supabaseAdmin
-            .from('practitioners')
-            .update({
-              last_login_at: new Date().toISOString(),
-              login_count: (existingPractitioner.login_count || 0) + 1,
-            })
-            .eq('id', existingPractitioner.id);
+        console.log('Updated login for practitioner:', existingPractitioner.id);
 
-          console.log('Updated login for practitioner:', existingPractitioner.id);
+        return NextResponse.json({
+          success: true,
+          linked: true,
+          practitionerId: existingPractitioner.id
+        });
+      }
 
-          return NextResponse.json({
-            success: true,
-            linked: true,
-            practitionerId: existingPractitioner.id
-          });
-        }
+      // No practitioner found - auto-create one for self-signup
+      console.log('No practitioner found, creating new one for:', user.email);
+
+      const { data: newPractitioner, error: createError } = await supabaseAdmin
+        .from('practitioners')
+        .insert({
+          user_id: user.id,
+          email: user.email.toLowerCase(),
+          name: user.user_metadata?.name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Practitioner',
+          status: 'active',
+          plan_type: 'trial',
+          billing_status: 'trial',
+          last_login_at: new Date().toISOString(),
+          login_count: 1,
+        })
+        .select('id')
+        .single();
+
+      if (createError) {
+        console.error('Error creating practitioner:', createError);
+      } else {
+        console.log('Created new practitioner:', newPractitioner?.id);
+
+        // Log the signup event
+        await supabaseAdmin.from('admin_events').insert({
+          actor_type: 'practitioner',
+          actor_id: user.id,
+          actor_email: user.email,
+          event_type: 'practitioner.self_signup',
+          event_category: 'practitioner',
+          practitioner_id: newPractitioner?.id,
+          description: `Self-signup for ${user.email}`,
+          metadata: {
+            created_at: new Date().toISOString(),
+          },
+        });
+
+        return NextResponse.json({
+          success: true,
+          created: true,
+          practitionerId: newPractitioner?.id
+        });
       }
     }
 

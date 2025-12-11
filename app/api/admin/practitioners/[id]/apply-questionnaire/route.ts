@@ -508,6 +508,7 @@ export async function POST(
         : 'Practitioner updated but practice settings may not have been saved (user may not have logged in yet)',
       applied: {
         full_name: practitioner.name,
+        timezone: questionnaire.timezone,
         workspace_name: questionnaire.practice_name,
         practice_type: questionnaire.practice_type,
         services_count: questionnaire.services?.length || 0,

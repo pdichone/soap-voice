@@ -45,12 +45,9 @@ export default function NewPractitionerPage() {
     if (plan?.price) {
       setMonthlyPrice(plan.price.toString());
     }
-    // Update billing status based on plan
-    if (value === 'trial') {
-      setBillingStatus('trial');
-    } else {
-      setBillingStatus('paying');
-    }
+    // Billing status stays as 'trial' until they complete payment via Stripe
+    // Only 'comped' plans should be set to a non-trial status manually
+    setBillingStatus('trial');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

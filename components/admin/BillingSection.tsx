@@ -33,42 +33,53 @@ function formatCurrency(amount: number | null) {
   }).format(amount);
 }
 
-function getStatusBadge(status: string | null, billingStatus?: string | null) {
-  // If subscription status is not set but billing is paying, show as active
-  if (!status && billingStatus === 'paying') {
-    return <Badge className="bg-green-500">Active</Badge>;
-  }
-  if (!status && billingStatus === 'trial') {
-    return <Badge variant="outline" className="border-blue-500 text-blue-600">Trial</Badge>;
+function getStatusBadge(status: string | null, billingStatus?: string | null, hasStripeSubscription?: boolean) {
+  // If there's an actual Stripe subscription, show its status
+  if (hasStripeSubscription) {
+    switch (status) {
+      case 'active':
+        return <Badge className="bg-green-500">Active</Badge>;
+      case 'trialing':
+        return <Badge variant="outline" className="border-blue-500 text-blue-600">Trial</Badge>;
+      case 'past_due':
+        return <Badge variant="destructive">Past Due</Badge>;
+      case 'canceled':
+        return <Badge variant="secondary">Canceled</Badge>;
+      default:
+        return <Badge className="bg-green-500">Active</Badge>;
+    }
   }
 
-  switch (status) {
-    case 'active':
-      return <Badge className="bg-green-500">Active</Badge>;
-    case 'trialing':
-      return <Badge variant="outline" className="border-blue-500 text-blue-600">Trial</Badge>;
-    case 'past_due':
-      return <Badge variant="destructive">Past Due</Badge>;
-    case 'canceled':
-      return <Badge variant="secondary">Canceled</Badge>;
-    default:
-      return <Badge variant="outline">None</Badge>;
-  }
+  // No Stripe subscription yet
+  return <Badge variant="outline" className="text-slate-500">None</Badge>;
 }
 
-function getBillingStatusBadge(status: string | null) {
-  switch (status) {
-    case 'paying':
-      return <Badge className="bg-green-500">Paying</Badge>;
-    case 'trial':
-      return <Badge variant="outline" className="border-blue-500 text-blue-600">Trial</Badge>;
-    case 'overdue':
-      return <Badge variant="destructive">Overdue</Badge>;
-    case 'cancelled':
-      return <Badge variant="secondary">Cancelled</Badge>;
-    default:
-      return <Badge variant="outline">None</Badge>;
+function getBillingStatusBadge(status: string | null, hasStripeSubscription?: boolean) {
+  // If they have a Stripe subscription, show the billing status
+  if (hasStripeSubscription) {
+    switch (status) {
+      case 'paying':
+        return <Badge className="bg-green-500">Paying</Badge>;
+      case 'trial':
+        return <Badge variant="outline" className="border-blue-500 text-blue-600">Trial</Badge>;
+      case 'overdue':
+        return <Badge variant="destructive">Overdue</Badge>;
+      case 'cancelled':
+        return <Badge variant="secondary">Cancelled</Badge>;
+      default:
+        return <Badge variant="outline">None</Badge>;
+    }
   }
+
+  // No subscription yet - show "Pending" to indicate they need to pay
+  if (status === 'trial') {
+    return <Badge variant="outline" className="border-amber-500 text-amber-600">Pending Payment</Badge>;
+  }
+  if (status === 'comped') {
+    return <Badge className="bg-purple-500">Comped</Badge>;
+  }
+
+  return <Badge variant="outline" className="text-slate-500">None</Badge>;
 }
 
 export function BillingSection({
@@ -214,11 +225,11 @@ export function BillingSection({
             </div>
             <div>
               <label className="text-xs font-medium text-slate-500">Subscription</label>
-              <div className="mt-1">{getStatusBadge(subscriptionStatus, billingStatus)}</div>
+              <div className="mt-1">{getStatusBadge(subscriptionStatus, billingStatus, !!stripeSubscriptionId)}</div>
             </div>
             <div>
               <label className="text-xs font-medium text-slate-500">Billing</label>
-              <div className="mt-1">{getBillingStatusBadge(billingStatus)}</div>
+              <div className="mt-1">{getBillingStatusBadge(billingStatus, !!stripeSubscriptionId)}</div>
             </div>
             <div>
               <label className="text-xs font-medium text-slate-500">Monthly Price</label>

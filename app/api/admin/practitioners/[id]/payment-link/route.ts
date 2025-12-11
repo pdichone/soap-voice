@@ -42,6 +42,13 @@ export async function GET(
     const { id } = await params;
     const supabase = createServiceRoleClient();
 
+    // Get practitioner to check subscription status
+    const { data: practitioner } = await supabase
+      .from('practitioners')
+      .select('billing_status, stripe_subscription_id')
+      .eq('id', id)
+      .single();
+
     // Get all payment links for this practitioner
     const { data: paymentLinks, error } = await supabase
       .from('payment_links')
@@ -58,13 +65,36 @@ export async function GET(
     }
 
     // Check for expired links and update status
+    // Also mark pending links as completed if practitioner has an active subscription
     const now = new Date();
+    const hasActiveSubscription = practitioner?.billing_status === 'paying' ||
+                                   practitioner?.billing_status === 'trial';
+
     const updatedLinks = paymentLinks?.map((link: PaymentLink) => {
-      if (link.status === 'pending' && new Date(link.expires_at) < now) {
-        return { ...link, status: 'expired' };
+      if (link.status === 'pending') {
+        // If practitioner has active subscription, mark as completed
+        if (hasActiveSubscription) {
+          return { ...link, status: 'completed' };
+        }
+        // Otherwise check if expired
+        if (new Date(link.expires_at) < now) {
+          return { ...link, status: 'expired' };
+        }
       }
       return link;
     }) || [];
+
+    // Also update in database if any pending links should be completed
+    if (hasActiveSubscription) {
+      const pendingLinks = paymentLinks?.filter((link: PaymentLink) => link.status === 'pending') || [];
+      if (pendingLinks.length > 0) {
+        await supabase
+          .from('payment_links')
+          .update({ status: 'completed', completed_at: new Date().toISOString() })
+          .eq('practitioner_id', id)
+          .eq('status', 'pending');
+      }
+    }
 
     return NextResponse.json({ payment_links: updatedLinks });
   } catch (error) {

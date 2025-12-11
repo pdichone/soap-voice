@@ -112,6 +112,19 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   if (error) {
     console.error('Error updating practitioner after checkout:', error);
   }
+
+  // Mark the payment link as completed
+  const { error: linkError } = await supabaseAdmin
+    .from('payment_links')
+    .update({
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+    })
+    .eq('stripe_checkout_session_id', session.id);
+
+  if (linkError) {
+    console.error('Error updating payment link status:', linkError);
+  }
 }
 
 async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {

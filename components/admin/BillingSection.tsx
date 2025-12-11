@@ -33,7 +33,15 @@ function formatCurrency(amount: number | null) {
   }).format(amount);
 }
 
-function getStatusBadge(status: string | null) {
+function getStatusBadge(status: string | null, billingStatus?: string | null) {
+  // If subscription status is not set but billing is paying, show as active
+  if (!status && billingStatus === 'paying') {
+    return <Badge className="bg-green-500">Active</Badge>;
+  }
+  if (!status && billingStatus === 'trial') {
+    return <Badge variant="outline" className="border-blue-500 text-blue-600">Trial</Badge>;
+  }
+
   switch (status) {
     case 'active':
       return <Badge className="bg-green-500">Active</Badge>;
@@ -206,7 +214,7 @@ export function BillingSection({
             </div>
             <div>
               <label className="text-xs font-medium text-slate-500">Subscription</label>
-              <div className="mt-1">{getStatusBadge(subscriptionStatus)}</div>
+              <div className="mt-1">{getStatusBadge(subscriptionStatus, billingStatus)}</div>
             </div>
             <div>
               <label className="text-xs font-medium text-slate-500">Billing</label>

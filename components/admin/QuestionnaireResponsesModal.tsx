@@ -63,21 +63,30 @@ export function QuestionnaireResponsesModal({
     }).format(cents / 100);
   };
 
+  const [applyMessage, setApplyMessage] = useState<string | null>(null);
+
   const handleApplySettings = async () => {
     setIsApplying(true);
     setApplyError(null);
+    setApplyMessage(null);
 
     try {
       const response = await fetch(`/api/admin/practitioners/${practitionerId}/apply-questionnaire`, {
         method: 'POST',
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        const data = await response.json();
         throw new Error(data.error || 'Failed to apply settings');
       }
 
       setApplySuccess(true);
+      setApplyMessage(data.message);
+
+      // Log what was applied for debugging
+      console.log('Apply result:', data);
+
       onSettingsApplied?.();
     } catch (error) {
       console.error('Error applying settings:', error);
@@ -312,7 +321,7 @@ export function QuestionnaireResponsesModal({
             {applySuccess ? (
               <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-md text-green-700">
                 <CheckCircle2 className="h-5 w-5" />
-                <span>Settings applied successfully! The page will refresh to show updated data.</span>
+                <span>{applyMessage || 'Settings applied!'} The page will refresh to show updated data.</span>
               </div>
             ) : (
               <div className="space-y-3">

@@ -53,6 +53,13 @@ export async function POST(
       );
     }
 
+    // Log what we received from questionnaire
+    console.log('Questionnaire data:', {
+      practice_name: questionnaire.practice_name,
+      practice_type: questionnaire.practice_type,
+      services: questionnaire.services?.length || 0,
+    });
+
     // Build update object for practitioner
     const practitionerUpdate: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
@@ -68,19 +75,39 @@ export async function POST(
       practitionerUpdate.practice_type = questionnaire.practice_type;
     }
 
-    // Note: timezone is stored in the questionnaire but practitioners table
-    // doesn't have a timezone column yet - it's on the practices table
+    // Check if there's anything to update besides timestamp
+    const hasUpdates = Object.keys(practitionerUpdate).length > 1;
+    console.log('Update payload:', practitionerUpdate, 'Has updates:', hasUpdates);
+
+    if (!hasUpdates) {
+      return NextResponse.json({
+        success: true,
+        message: 'No settings to apply - questionnaire may not have practice name or type filled in',
+        applied: {
+          workspace_name: null,
+          practice_type: null,
+          services_count: questionnaire.services?.length || 0,
+        },
+        questionnaire_data: {
+          practice_name: questionnaire.practice_name,
+          practice_type: questionnaire.practice_type,
+        }
+      });
+    }
 
     // Update practitioner record
-    const { error: updateError } = await adminClient
+    const { data: updateResult, error: updateError } = await adminClient
       .from('practitioners')
       .update(practitionerUpdate)
-      .eq('id', id);
+      .eq('id', id)
+      .select();
+
+    console.log('Update result:', updateResult, 'Error:', updateError);
 
     if (updateError) {
       console.error('Error updating practitioner:', updateError);
       return NextResponse.json(
-        { error: 'Failed to update practitioner settings' },
+        { error: `Failed to update practitioner settings: ${updateError.message}` },
         { status: 500 }
       );
     }
@@ -132,6 +159,7 @@ export async function POST(
         practice_type: questionnaire.practice_type,
         services_count: questionnaire.services?.length || 0,
       },
+      updated_record: updateResult?.[0] || null,
     });
   } catch (error) {
     console.error('Error applying questionnaire:', error);

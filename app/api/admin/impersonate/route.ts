@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     });
 
     setImpersonationCookies(response, {
-      workspaceId: practitioner.workspace_id,
+      workspaceId: practitioner.workspace_id || 'no-workspace',
       sessionId: session.id,
       practitionerName: practitioner.name,
       practitionerId: practitioner.id,

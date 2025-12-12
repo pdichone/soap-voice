@@ -131,8 +131,11 @@ export async function getImpersonationContext(): Promise<ImpersonationContext> {
   const practitionerId = cookieStore.get(IMPERSONATION_COOKIES.PRACTITIONER_ID)?.value || null;
   const adminReturnUrl = cookieStore.get(IMPERSONATION_COOKIES.ADMIN_RETURN_URL)?.value || null;
 
+  // Check for practitionerId (most reliable) or sessionId for impersonation
+  const isImpersonating = !!practitionerId && !!sessionId;
+
   return {
-    isImpersonating: !!workspaceId && !!sessionId,
+    isImpersonating,
     practitionerId,
     practitionerName,
     workspaceId,

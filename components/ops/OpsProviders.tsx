@@ -4,7 +4,9 @@ import { ReactNode } from 'react';
 import { PracticeConfigProvider, usePracticeConfig } from '@/lib/practice-config';
 import { FeatureFlagsProvider } from '@/lib/feature-flags';
 import { ToastProvider } from '@/lib/toast-context';
+import { EffectiveUserProvider } from '@/lib/contexts/effective-user-context';
 import { Onboarding } from './Onboarding';
+import { ImpersonationBanner } from './ImpersonationBanner';
 
 interface OpsProvidersProps {
   children: ReactNode;
@@ -34,12 +36,15 @@ function OpsContent({ children }: { children: ReactNode }) {
 
 export function OpsProviders({ children }: OpsProvidersProps) {
   return (
-    <PracticeConfigProvider>
-      <FeatureFlagsProvider>
-        <ToastProvider>
-          <OpsContent>{children}</OpsContent>
-        </ToastProvider>
-      </FeatureFlagsProvider>
-    </PracticeConfigProvider>
+    <EffectiveUserProvider>
+      <PracticeConfigProvider>
+        <FeatureFlagsProvider>
+          <ToastProvider>
+            <ImpersonationBanner />
+            <OpsContent>{children}</OpsContent>
+          </ToastProvider>
+        </FeatureFlagsProvider>
+      </PracticeConfigProvider>
+    </EffectiveUserProvider>
   );
 }

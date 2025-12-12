@@ -4,6 +4,20 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { createClient } from '@/lib/supabase';
 import type { Practice, PracticeType } from '@/lib/types-ops';
 
+// Helper to get effective user (works with impersonation)
+async function getEffectiveUser(): Promise<{ id: string; email: string } | null> {
+  try {
+    const response = await fetch('/api/auth/me');
+    const data = await response.json();
+    if (response.ok && data.user) {
+      return data.user;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // =============================================
 // Practice Feature Configuration
 // =============================================
@@ -92,94 +106,18 @@ export function PracticeConfigProvider({ children }: PracticeConfigProviderProps
     setError(null);
 
     try {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      // Use the API endpoint which supports impersonation
+      const response = await fetch('/api/auth/practice');
+      const data = await response.json();
 
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-
-      // First, check if admin has set a practice_type in the practitioners table
-      // This is the admin-controlled source of truth
-      const { data: practitioner } = await supabase
-        .from('practitioners')
-        .select('practice_type')
-        .eq('user_id', user.id)
-        .single();
-
-      // Get user's profile to find their practice_id
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('practice_id')
-        .eq('id', user.id)
-        .single();
-
-      if (profileError) {
-        // If profiles table doesn't have practice_id yet (migration not run),
-        // but we have practitioner data, use that
-        if (practitioner?.practice_type) {
-          setPractice({
-            id: 'admin-controlled',
-            name: 'My Practice',
-            practice_type: practitioner.practice_type as PracticeType,
-            settings: {},
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          });
-        }
-        setLoading(false);
-        return;
-      }
-
-      if (!profile?.practice_id) {
-        // No practice associated yet - but check if we have admin-controlled type
-        if (practitioner?.practice_type) {
-          setPractice({
-            id: 'admin-controlled',
-            name: 'My Practice',
-            practice_type: practitioner.practice_type as PracticeType,
-            settings: {},
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          });
-        }
-        setLoading(false);
-        return;
-      }
-
-      // Fetch the practice details
-      const { data: practiceData, error: practiceError } = await supabase
-        .from('practices')
-        .select('*')
-        .eq('id', profile.practice_id)
-        .single();
-
-      if (practiceError) {
-        console.warn('Could not fetch practice:', practiceError);
-        // Fall back to practitioner-controlled type if available
-        if (practitioner?.practice_type) {
-          setPractice({
-            id: 'admin-controlled',
-            name: 'My Practice',
-            practice_type: practitioner.practice_type as PracticeType,
-            settings: {},
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          });
-        }
-        setLoading(false);
-        return;
-      }
-
-      // If admin has set a practice_type, it takes precedence
-      if (practitioner?.practice_type) {
-        setPractice({
-          ...practiceData,
-          practice_type: practitioner.practice_type as PracticeType,
-        });
+      if (response.ok && data.practice) {
+        setPractice(data.practice);
+      } else if (response.ok && !data.practice) {
+        // No practice set up yet - user needs onboarding
+        setPractice(null);
       } else {
-        setPractice(practiceData);
+        console.warn('Could not fetch practice:', data.error);
+        setError(data.error || 'Failed to load practice');
       }
     } catch (err) {
       console.error('Error fetching practice config:', err);
@@ -192,7 +130,8 @@ export function PracticeConfigProvider({ children }: PracticeConfigProviderProps
   const updatePracticeType = async (type: PracticeType) => {
     try {
       const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      // Use effective user API (supports impersonation)
+      const user = await getEffectiveUser();
       if (!user) throw new Error('Not authenticated');
 
       console.log('Updating practice type for user:', user.id, 'to:', type);

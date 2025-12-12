@@ -1,4 +1,5 @@
-import { createServerSupabaseClient } from '@/lib/supabase-server';
+import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase-server';
+import { getImpersonationContext } from '@/lib/admin-auth';
 import type {
   PatientNonPhi,
   PatientWithStats,
@@ -22,6 +23,49 @@ import type {
   PortalWithClaimCount,
 } from '@/lib/types-ops';
 import { getCollectAmount } from '@/lib/benefits-calculator';
+
+// =============================================
+// EFFECTIVE USER HELPER (supports impersonation)
+// =============================================
+
+interface EffectiveUserResult {
+  userId: string | null;
+  client: Awaited<ReturnType<typeof createServerSupabaseClient>> | ReturnType<typeof createServiceRoleClient>;
+  isImpersonating: boolean;
+}
+
+/**
+ * Get the effective user ID and appropriate Supabase client
+ * During impersonation, returns the practitioner's user_id and service role client
+ * Otherwise, returns the real user's ID and standard client
+ */
+async function getEffectiveUserAndClient(): Promise<EffectiveUserResult> {
+  const impersonation = await getImpersonationContext();
+
+  if (impersonation.isImpersonating && impersonation.practitionerId) {
+    const adminClient = createServiceRoleClient();
+    const { data: practitioner } = await adminClient
+      .from('practitioners')
+      .select('user_id')
+      .eq('id', impersonation.practitionerId)
+      .single();
+
+    return {
+      userId: practitioner?.user_id || null,
+      client: adminClient,
+      isImpersonating: true,
+    };
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  return {
+    userId: user?.id || null,
+    client: supabase,
+    isImpersonating: false,
+  };
+}
 
 // =============================================
 // TIMEZONE HELPERS
@@ -68,28 +112,26 @@ function getStartOfWeekInTimezone(timezone: string = 'America/Los_Angeles'): { d
 // =============================================
 
 export async function getProfile(): Promise<Profile | null> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return null;
 
-  const { data } = await supabase
+  const { data } = await client
     .from('profiles')
     .select('*')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   return data;
 }
 
 export async function updateProfile(updates: Partial<Profile>): Promise<Profile | null> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return null;
 
-  const { data } = await supabase
+  const { data } = await client
     .from('profiles')
     .update(updates)
-    .eq('id', user.id)
+    .eq('id', userId)
     .select()
     .single();
 
@@ -155,8 +197,7 @@ export interface PracticeConfig {
 }
 
 export async function getPracticeConfig(): Promise<PracticeConfig> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { userId, client } = await getEffectiveUserAndClient();
 
   // Default config for insurance practice type
   const defaultConfig: PracticeConfig = {
@@ -165,19 +206,19 @@ export async function getPracticeConfig(): Promise<PracticeConfig> {
     features: PRACTICE_FEATURES['insurance'],
   };
 
-  if (!user) return defaultConfig;
+  if (!userId) return defaultConfig;
 
   // Get user's profile to find their practice_id
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('practice_id')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   if (!profile?.practice_id) return defaultConfig;
 
   // Fetch the practice details
-  const { data: practice } = await supabase
+  const { data: practice } = await client
     .from('practices')
     .select('*')
     .eq('id', profile.practice_id)
@@ -213,16 +254,15 @@ const DEFAULT_ADMIN_FLAGS: AdminFeatureFlags = {
  * These are controlled by super admins.
  */
 export async function getAdminFeatureFlags(): Promise<AdminFeatureFlags> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { userId, client } = await getEffectiveUserAndClient();
 
-  if (!user) return DEFAULT_ADMIN_FLAGS;
+  if (!userId) return DEFAULT_ADMIN_FLAGS;
 
   // Fetch from practitioners table where user_id matches
-  const { data: practitioner, error } = await supabase
+  const { data: practitioner, error } = await client
     .from('practitioners')
     .select('feature_claims_tracking, feature_year_end_summary')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .single();
 
   if (error || !practitioner) {
@@ -237,9 +277,9 @@ export async function getAdminFeatureFlags(): Promise<AdminFeatureFlags> {
 }
 
 export async function updatePracticeType(practiceId: string, practiceType: PracticeType): Promise<Practice | null> {
-  const supabase = await createServerSupabaseClient();
+  const { client } = await getEffectiveUserAndClient();
 
-  const { data } = await supabase
+  const { data } = await client
     .from('practices')
     .update({ practice_type: practiceType })
     .eq('id', practiceId)
@@ -254,14 +294,13 @@ export async function updatePracticeType(practiceId: string, practiceType: Pract
 // =============================================
 
 export async function getPatients(activeOnly = true): Promise<PatientNonPhi[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
-  let query = supabase
+  let query = client
     .from('patients_non_phi')
     .select('*')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .order('display_name');
 
   if (activeOnly) {
@@ -273,19 +312,18 @@ export async function getPatients(activeOnly = true): Promise<PatientNonPhi[]> {
 }
 
 export async function getPatientsWithStats(): Promise<PatientWithStats[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   // Get patients with visit counts
-  const { data: patients } = await supabase
+  const { data: patients } = await client
     .from('patients_non_phi')
     .select(`
       *,
       visits:visits_non_phi(count),
       claims:claims_non_phi(count)
     `)
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .eq('is_active', true)
     .order('display_name');
 
@@ -295,7 +333,7 @@ export async function getPatientsWithStats(): Promise<PatientWithStats[]> {
   const patientsWithStats: PatientWithStats[] = await Promise.all(
     patients.map(async (patient) => {
       // Get last visit
-      const { data: lastVisit } = await supabase
+      const { data: lastVisit } = await client
         .from('visits_non_phi')
         .select('visit_date')
         .eq('patient_id', patient.id)
@@ -304,14 +342,14 @@ export async function getPatientsWithStats(): Promise<PatientWithStats[]> {
         .single();
 
       // Get pending claims count
-      const { count: pendingClaims } = await supabase
+      const { count: pendingClaims } = await client
         .from('claims_non_phi')
         .select('*', { count: 'exact', head: true })
         .eq('patient_id', patient.id)
         .in('status', ['TO_SUBMIT', 'SUBMITTED', 'PENDING']);
 
       // Get active referral
-      const { data: activeReferral } = await supabase
+      const { data: activeReferral } = await client
         .from('referrals_non_phi')
         .select('*')
         .eq('patient_id', patient.id)
@@ -334,27 +372,26 @@ export async function getPatientsWithStats(): Promise<PatientWithStats[]> {
 }
 
 export async function getPatient(id: string): Promise<PatientWithStats | null> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return null;
 
-  const { data: patient } = await supabase
+  const { data: patient } = await client
     .from('patients_non_phi')
     .select('*')
     .eq('id', id)
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .single();
 
   if (!patient) return null;
 
   // Get visit count
-  const { count: visitCount } = await supabase
+  const { count: visitCount } = await client
     .from('visits_non_phi')
     .select('*', { count: 'exact', head: true })
     .eq('patient_id', id);
 
   // Get last visit
-  const { data: lastVisit } = await supabase
+  const { data: lastVisit } = await client
     .from('visits_non_phi')
     .select('visit_date')
     .eq('patient_id', id)
@@ -363,14 +400,14 @@ export async function getPatient(id: string): Promise<PatientWithStats | null> {
     .single();
 
   // Get pending claims count
-  const { count: pendingClaims } = await supabase
+  const { count: pendingClaims } = await client
     .from('claims_non_phi')
     .select('*', { count: 'exact', head: true })
     .eq('patient_id', id)
     .in('status', ['TO_SUBMIT', 'SUBMITTED', 'PENDING']);
 
   // Get active referral
-  const { data: activeReferral } = await supabase
+  const { data: activeReferral } = await client
     .from('referrals_non_phi')
     .select('*')
     .eq('patient_id', id)
@@ -399,18 +436,17 @@ interface RecentPatient {
  * Get patients with recent visit activity, sorted by most recent visit first
  */
 export async function getRecentPatients(limit = 5): Promise<RecentPatient[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   // Get the most recent visits with patient info
-  const { data: recentVisits } = await supabase
+  const { data: recentVisits } = await client
     .from('visits_non_phi')
     .select(`
       visit_date,
       patient:patients_non_phi!inner(id, display_name, insurer_name, is_active)
     `)
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .order('visit_date', { ascending: false })
     .limit(50); // Get more to dedupe
 
@@ -439,13 +475,12 @@ export async function getRecentPatients(limit = 5): Promise<RecentPatient[]> {
 }
 
 export async function createPatient(patient: Omit<PatientNonPhi, 'id' | 'owner_user_id' | 'created_at' | 'updated_at'>): Promise<PatientNonPhi | null> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return null;
 
-  const { data } = await supabase
+  const { data } = await client
     .from('patients_non_phi')
-    .insert({ ...patient, owner_user_id: user.id })
+    .insert({ ...patient, owner_user_id: userId })
     .select()
     .single();
 
@@ -457,14 +492,13 @@ export async function createPatient(patient: Omit<PatientNonPhi, 'id' | 'owner_u
 // =============================================
 
 export async function getVisits(options?: { patientId?: string; limit?: number }): Promise<VisitNonPhi[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
-  let query = supabase
+  let query = client
     .from('visits_non_phi')
     .select('*, patient:patients_non_phi(id, display_name)')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .order('visit_date', { ascending: false });
 
   if (options?.patientId) {
@@ -480,13 +514,12 @@ export async function getVisits(options?: { patientId?: string; limit?: number }
 }
 
 export async function createVisit(visit: Omit<VisitNonPhi, 'id' | 'owner_user_id' | 'created_at'>): Promise<VisitNonPhi | null> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return null;
 
-  const { data } = await supabase
+  const { data } = await client
     .from('visits_non_phi')
-    .insert({ ...visit, owner_user_id: user.id })
+    .insert({ ...visit, owner_user_id: userId })
     .select()
     .single();
 
@@ -498,14 +531,13 @@ export async function createVisit(visit: Omit<VisitNonPhi, 'id' | 'owner_user_id
 // =============================================
 
 export async function getClaims(options?: { status?: string; patientId?: string }): Promise<ClaimWithPatient[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
-  let query = supabase
+  let query = client
     .from('claims_non_phi')
     .select('*, patient:patients_non_phi(id, display_name)')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .order('date_of_service', { ascending: false });
 
   if (options?.status) {
@@ -521,14 +553,13 @@ export async function getClaims(options?: { status?: string; patientId?: string 
 }
 
 export async function getPendingClaims(): Promise<ClaimWithPatient[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
-  const { data } = await supabase
+  const { data } = await client
     .from('claims_non_phi')
     .select('*, patient:patients_non_phi(id, display_name)')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .in('status', ['TO_SUBMIT', 'SUBMITTED', 'PENDING'])
     .order('date_of_service', { ascending: true });
 
@@ -536,13 +567,12 @@ export async function getPendingClaims(): Promise<ClaimWithPatient[]> {
 }
 
 export async function createClaim(claim: Omit<ClaimNonPhi, 'id' | 'owner_user_id' | 'created_at' | 'updated_at'>): Promise<ClaimNonPhi | null> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return null;
 
-  const { data } = await supabase
+  const { data } = await client
     .from('claims_non_phi')
-    .insert({ ...claim, owner_user_id: user.id })
+    .insert({ ...claim, owner_user_id: userId })
     .select()
     .single();
 
@@ -550,9 +580,8 @@ export async function createClaim(claim: Omit<ClaimNonPhi, 'id' | 'owner_user_id
 }
 
 export async function updateClaimStatus(id: string, status: string, notes?: string): Promise<ClaimNonPhi | null> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return null;
 
   const updates: Partial<ClaimNonPhi> = { status: status as ClaimNonPhi['status'] };
 
@@ -566,11 +595,11 @@ export async function updateClaimStatus(id: string, status: string, notes?: stri
     updates.notes = notes;
   }
 
-  const { data } = await supabase
+  const { data } = await client
     .from('claims_non_phi')
     .update(updates)
     .eq('id', id)
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .select()
     .single();
 
@@ -582,14 +611,13 @@ export async function updateClaimStatus(id: string, status: string, notes?: stri
 // =============================================
 
 export async function getPayments(options?: { patientId?: string; startDate?: string; endDate?: string }): Promise<PaymentNonPhi[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
-  let query = supabase
+  let query = client
     .from('payments_non_phi')
     .select('*, patient:patients_non_phi(id, display_name)')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .order('created_at', { ascending: false });
 
   if (options?.patientId) {
@@ -609,13 +637,12 @@ export async function getPayments(options?: { patientId?: string; startDate?: st
 }
 
 export async function createPayment(payment: Omit<PaymentNonPhi, 'id' | 'owner_user_id' | 'created_at'>): Promise<PaymentNonPhi | null> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return null;
 
-  const { data } = await supabase
+  const { data } = await client
     .from('payments_non_phi')
-    .insert({ ...payment, owner_user_id: user.id })
+    .insert({ ...payment, owner_user_id: userId })
     .select()
     .single();
 
@@ -627,32 +654,30 @@ export async function createPayment(payment: Omit<PaymentNonPhi, 'id' | 'owner_u
 // =============================================
 
 export async function getReferrals(patientId: string): Promise<ReferralNonPhi[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
-  const { data } = await supabase
+  const { data } = await client
     .from('referrals_non_phi')
     .select('*')
     .eq('patient_id', patientId)
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .order('referral_start_date', { ascending: false });
 
   return data || [];
 }
 
 export async function getExpiringReferrals(daysAhead = 30): Promise<ReferralNonPhi[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   const today = new Date();
   const futureDate = new Date(today.getTime() + daysAhead * 24 * 60 * 60 * 1000);
 
-  const { data } = await supabase
+  const { data } = await client
     .from('referrals_non_phi')
     .select('*, patient:patients_non_phi(id, display_name)')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('referral_expiration_date', today.toISOString().split('T')[0])
     .lte('referral_expiration_date', futureDate.toISOString().split('T')[0])
     .order('referral_expiration_date', { ascending: true });
@@ -665,17 +690,16 @@ export async function getExpiringReferrals(daysAhead = 30): Promise<ReferralNonP
 // =============================================
 
 export async function getOverdueClaimsCount(thresholdDays = 21): Promise<number> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return 0;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return 0;
 
   const thresholdDate = new Date();
   thresholdDate.setDate(thresholdDate.getDate() - thresholdDays);
 
-  const { count } = await supabase
+  const { count } = await client
     .from('claims_non_phi')
     .select('*', { count: 'exact', head: true })
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .in('status', ['SUBMITTED', 'PENDING'])
     .lte('date_submitted', thresholdDate.toISOString().split('T')[0]);
 
@@ -683,24 +707,23 @@ export async function getOverdueClaimsCount(thresholdDays = 21): Promise<number>
 }
 
 export async function getTodaysVisits(): Promise<(VisitNonPhi & { patient?: PatientNonPhi })[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
   const today = getDateInTimezone(timezone);
 
-  const { data } = await supabase
+  const { data } = await client
     .from('visits_non_phi')
     .select('*, patient:patients_non_phi(*)')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .eq('visit_date', today)
     .order('created_at', { ascending: true });
 
@@ -714,25 +737,24 @@ export interface VisitWithCollection extends VisitNonPhi {
 }
 
 export async function getTodaysVisitsWithCollections(): Promise<VisitWithCollection[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
   const today = getDateInTimezone(timezone);
 
   // Get today's visits with patient info
-  const { data: visits } = await supabase
+  const { data: visits } = await client
     .from('visits_non_phi')
     .select('*, patient:patients_non_phi(*)')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .eq('visit_date', today)
     .order('created_at', { ascending: true });
 
@@ -742,7 +764,7 @@ export async function getTodaysVisitsWithCollections(): Promise<VisitWithCollect
   const visitIds = visits.map(v => v.id);
 
   // Fetch payments for these visits
-  const { data: paymentsData } = await supabase
+  const { data: paymentsData } = await client
     .from('payments_non_phi')
     .select('visit_id, amount')
     .in('visit_id', visitIds);
@@ -761,7 +783,7 @@ export async function getTodaysVisitsWithCollections(): Promise<VisitWithCollect
   const patientIds = Array.from(new Set(visits.map(v => v.patient_id).filter(Boolean)));
 
   // Fetch benefits for all patients in one query
-  const { data: benefitsData } = await supabase
+  const { data: benefitsData } = await client
     .from('patient_benefits')
     .select('*')
     .in('patient_id', patientIds);
@@ -791,24 +813,23 @@ export async function getTodaysVisitsWithCollections(): Promise<VisitWithCollect
 }
 
 export async function getTodaysPayments(): Promise<(PaymentNonPhi & { patient?: PatientNonPhi })[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
   const startOfToday = getStartOfTodayInTimezone(timezone);
 
-  const { data } = await supabase
+  const { data } = await client
     .from('payments_non_phi')
     .select('*, patient:patients_non_phi(id, display_name)')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('created_at', startOfToday)
     .order('created_at', { ascending: false });
 
@@ -816,15 +837,14 @@ export async function getTodaysPayments(): Promise<(PaymentNonPhi & { patient?: 
 }
 
 export async function getWeeklyPaymentsSummary(): Promise<{ thisWeek: number; lastWeek: number; byMethod: Record<string, number> }> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { thisWeek: 0, lastWeek: 0, byMethod: {} };
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return { thisWeek: 0, lastWeek: 0, byMethod: {} };
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
@@ -836,17 +856,17 @@ export async function getWeeklyPaymentsSummary(): Promise<{ thisWeek: number; la
   const startOfLastWeekISO = new Date(`${lastWeekStartDate.toISOString().split('T')[0]}T00:00:00`).toISOString();
 
   // This week's payments
-  const { data: thisWeekPayments } = await supabase
+  const { data: thisWeekPayments } = await client
     .from('payments_non_phi')
     .select('amount, method')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('created_at', startOfThisWeekISO);
 
   // Last week's payments
-  const { data: lastWeekPayments } = await supabase
+  const { data: lastWeekPayments } = await client
     .from('payments_non_phi')
     .select('amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('created_at', startOfLastWeekISO)
     .lt('created_at', startOfThisWeekISO);
 
@@ -864,15 +884,14 @@ export async function getWeeklyPaymentsSummary(): Promise<{ thisWeek: number; la
 }
 
 export async function getPatientsNearVisitLimit(): Promise<{ patient: PatientNonPhi; referral: ReferralNonPhi; visitsUsed: number }[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   // Get active referrals with visit limits
-  const { data: referrals } = await supabase
+  const { data: referrals } = await client
     .from('referrals_non_phi')
     .select('*, patient:patients_non_phi(*)')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .not('visit_limit_count', 'is', null)
     .or(`referral_expiration_date.is.null,referral_expiration_date.gte.${new Date().toISOString().split('T')[0]}`);
 
@@ -882,7 +901,7 @@ export async function getPatientsNearVisitLimit(): Promise<{ patient: PatientNon
 
   for (const referral of referrals) {
     // Count visits linked to this referral
-    const { count } = await supabase
+    const { count } = await client
       .from('visits_non_phi')
       .select('*', { count: 'exact', head: true })
       .eq('referral_id', referral.id);
@@ -908,10 +927,9 @@ export async function getPatientsNearVisitLimit(): Promise<{ patient: PatientNon
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { userId, client } = await getEffectiveUserAndClient();
 
-  if (!user) {
+  if (!userId) {
     return {
       total_patients: 0,
       active_patients: 0,
@@ -925,10 +943,10 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   }
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
@@ -945,54 +963,54 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   const thirtyDaysFromNow = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   // Get patient counts
-  const { count: totalPatients } = await supabase
+  const { count: totalPatients } = await client
     .from('patients_non_phi')
     .select('*', { count: 'exact', head: true })
-    .eq('owner_user_id', user.id);
+    .eq('owner_user_id', userId);
 
-  const { count: activePatients } = await supabase
+  const { count: activePatients } = await client
     .from('patients_non_phi')
     .select('*', { count: 'exact', head: true })
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .eq('is_active', true);
 
   // Get visit counts
-  const { count: visitsThisWeek } = await supabase
+  const { count: visitsThisWeek } = await client
     .from('visits_non_phi')
     .select('*', { count: 'exact', head: true })
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('visit_date', startOfWeekDate);
 
-  const { count: visitsThisMonth } = await supabase
+  const { count: visitsThisMonth } = await client
     .from('visits_non_phi')
     .select('*', { count: 'exact', head: true })
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('visit_date', startOfMonthDate);
 
   // Get pending claims
-  const { data: pendingClaims } = await supabase
+  const { data: pendingClaims } = await client
     .from('claims_non_phi')
     .select('billed_amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .in('status', ['TO_SUBMIT', 'SUBMITTED', 'PENDING']);
 
   const pendingClaimsAmount = pendingClaims?.reduce((sum, c) => sum + (c.billed_amount || 0), 0) || 0;
 
   // Get expiring referrals count
   const thirtyDaysFromNowStr = thirtyDaysFromNow.toISOString().split('T')[0];
-  const { count: expiringReferrals } = await supabase
+  const { count: expiringReferrals } = await client
     .from('referrals_non_phi')
     .select('*', { count: 'exact', head: true })
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('referral_expiration_date', todayStr)
     .lte('referral_expiration_date', thirtyDaysFromNowStr);
 
   // Get payments this month
   const startOfMonthISO = new Date(`${startOfMonthDate}T00:00:00`).toISOString();
-  const { data: paymentsData } = await supabase
+  const { data: paymentsData } = await client
     .from('payments_non_phi')
     .select('amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('created_at', startOfMonthISO);
 
   const paymentsThisMonth = paymentsData?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
@@ -1014,25 +1032,24 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 // =============================================
 
 export async function getTodaysCopaysExpected(): Promise<number> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return 0;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return 0;
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
   const today = getDateInTimezone(timezone);
 
   // Get today's visits with patient copay amounts
-  const { data: visits } = await supabase
+  const { data: visits } = await client
     .from('visits_non_phi')
     .select('patient:patients_non_phi(default_copay_amount)')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .eq('visit_date', today)
     .eq('is_billable_to_insurance', true);
 
@@ -1045,24 +1062,23 @@ export async function getTodaysCopaysExpected(): Promise<number> {
 }
 
 export async function getTodaysCopaysCollected(): Promise<number> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return 0;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return 0;
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
   const startOfToday = getStartOfTodayInTimezone(timezone);
 
-  const { data: payments } = await supabase
+  const { data: payments } = await client
     .from('payments_non_phi')
     .select('amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .eq('is_copay', true)
     .gte('created_at', startOfToday);
 
@@ -1072,24 +1088,23 @@ export async function getTodaysCopaysCollected(): Promise<number> {
 }
 
 export async function getClaimsPaidThisWeek(): Promise<number> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return 0;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return 0;
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
   const { date: startOfWeekDate } = getStartOfWeekInTimezone(timezone);
 
-  const { count } = await supabase
+  const { count } = await client
     .from('claims_non_phi')
     .select('*', { count: 'exact', head: true })
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .eq('status', 'PAID')
     .gte('date_paid', startOfWeekDate);
 
@@ -1097,25 +1112,24 @@ export async function getClaimsPaidThisWeek(): Promise<number> {
 }
 
 export async function getInsurancePaymentsThisWeek(): Promise<number> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return 0;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return 0;
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
   const { date: startOfWeekDate } = getStartOfWeekInTimezone(timezone);
 
   // Get all paid claims this week - use paid_amount if available, otherwise billed_amount
-  const { data } = await supabase
+  const { data } = await client
     .from('claims_non_phi')
     .select('paid_amount, billed_amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .eq('status', 'PAID')
     .gte('date_paid', startOfWeekDate);
 
@@ -1126,19 +1140,18 @@ export async function getReferralAlerts(): Promise<{
   critical: { patient: PatientNonPhi; referral: ReferralNonPhi; visitsUsed: number; reason: string }[];
   warning: { patient: PatientNonPhi; referral: ReferralNonPhi; visitsUsed: number; reason: string }[];
 }> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { critical: [], warning: [] };
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return { critical: [], warning: [] };
 
   const today = new Date();
   const sevenDaysFromNow = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
   const thirtyDaysFromNow = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   // Get active referrals
-  const { data: referrals } = await supabase
+  const { data: referrals } = await client
     .from('referrals_non_phi')
     .select('*, patient:patients_non_phi(*)')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .or(`referral_expiration_date.is.null,referral_expiration_date.gte.${today.toISOString().split('T')[0]}`);
 
   if (!referrals) return { critical: [], warning: [] };
@@ -1148,7 +1161,7 @@ export async function getReferralAlerts(): Promise<{
 
   for (const referral of referrals) {
     // Count visits for this referral
-    const { count } = await supabase
+    const { count } = await client
       .from('visits_non_phi')
       .select('*', { count: 'exact', head: true })
       .eq('referral_id', referral.id);
@@ -1211,18 +1224,17 @@ export async function getReferralAlerts(): Promise<{
 // =============================================
 
 export async function getEarningsSummary(): Promise<EarningsSummary> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { userId, client } = await getEffectiveUserAndClient();
 
-  if (!user) {
+  if (!userId) {
     return { thisWeek: 0, thisMonth: 0, thisYear: 0, lastWeek: 0, lastMonth: 0, lastYear: 0 };
   }
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
@@ -1257,73 +1269,73 @@ export async function getEarningsSummary(): Promise<EarningsSummary> {
   const lastYearEnd = `${lastYear}-12-31T23:59:59`;
 
   // This week payments
-  const { data: thisWeekPayments } = await supabase
+  const { data: thisWeekPayments } = await client
     .from('payments_non_phi')
     .select('amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('created_at', thisWeekStartDate.toISOString());
 
   // Last week payments
-  const { data: lastWeekPayments } = await supabase
+  const { data: lastWeekPayments } = await client
     .from('payments_non_phi')
     .select('amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('created_at', lastWeekStartDate.toISOString())
     .lt('created_at', thisWeekStartDate.toISOString());
 
   // This month payments
-  const { data: thisMonthPayments } = await supabase
+  const { data: thisMonthPayments } = await client
     .from('payments_non_phi')
     .select('amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('created_at', new Date(`${thisMonthStart}T00:00:00`).toISOString());
 
   // Last month payments
-  const { data: lastMonthPayments } = await supabase
+  const { data: lastMonthPayments } = await client
     .from('payments_non_phi')
     .select('amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('created_at', new Date(`${lastMonthStart}T00:00:00`).toISOString())
     .lt('created_at', new Date(`${thisMonthStart}T00:00:00`).toISOString());
 
   // This year payments
-  const { data: thisYearPayments } = await supabase
+  const { data: thisYearPayments } = await client
     .from('payments_non_phi')
     .select('amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('created_at', new Date(`${thisYearStart}T00:00:00`).toISOString());
 
   // Last year payments
-  const { data: lastYearPayments } = await supabase
+  const { data: lastYearPayments } = await client
     .from('payments_non_phi')
     .select('amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('created_at', new Date(`${lastYearStart}T00:00:00`).toISOString())
     .lte('created_at', lastYearEnd);
 
   // Insurance payments from paid claims (based on date_paid)
   // Use paid_amount if available, otherwise fall back to billed_amount
   // This week insurance
-  const { data: thisWeekInsurance } = await supabase
+  const { data: thisWeekInsurance } = await client
     .from('claims_non_phi')
     .select('paid_amount, billed_amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .eq('status', 'PAID')
     .gte('date_paid', thisWeekStart);
 
   // This month insurance
-  const { data: thisMonthInsurance } = await supabase
+  const { data: thisMonthInsurance } = await client
     .from('claims_non_phi')
     .select('paid_amount, billed_amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .eq('status', 'PAID')
     .gte('date_paid', thisMonthStart);
 
   // This year insurance
-  const { data: thisYearInsurance } = await supabase
+  const { data: thisYearInsurance } = await client
     .from('claims_non_phi')
     .select('paid_amount, billed_amount')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .eq('status', 'PAID')
     .gte('date_paid', thisYearStart);
 
@@ -1349,15 +1361,14 @@ export async function getEarningsSummary(): Promise<EarningsSummary> {
 }
 
 export async function getWeeklyEarnings(weeks: number = 8): Promise<WeeklyEarning[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
@@ -1378,28 +1389,28 @@ export async function getWeeklyEarnings(weeks: number = 8): Promise<WeeklyEarnin
     const weekEndISO = new Date(`${weekEnd}T23:59:59`).toISOString();
 
     // Get payments for this week
-    const { data: payments } = await supabase
+    const { data: payments } = await client
       .from('payments_non_phi')
       .select('amount, is_copay')
-      .eq('owner_user_id', user.id)
+      .eq('owner_user_id', userId)
       .gte('created_at', weekStartISO)
       .lte('created_at', weekEndISO);
 
     // Get insurance payments (paid claims) for this week
     // Use paid_amount if available, otherwise fall back to billed_amount
-    const { data: paidClaims } = await supabase
+    const { data: paidClaims } = await client
       .from('claims_non_phi')
       .select('paid_amount, billed_amount')
-      .eq('owner_user_id', user.id)
+      .eq('owner_user_id', userId)
       .eq('status', 'PAID')
       .gte('date_paid', weekStart)
       .lte('date_paid', weekEnd);
 
     // Get visits for this week
-    const { count: visitCount } = await supabase
+    const { count: visitCount } = await client
       .from('visits_non_phi')
       .select('*', { count: 'exact', head: true })
-      .eq('owner_user_id', user.id)
+      .eq('owner_user_id', userId)
       .gte('visit_date', weekStart)
       .lte('visit_date', weekEnd);
 
@@ -1423,15 +1434,14 @@ export async function getWeeklyEarnings(weeks: number = 8): Promise<WeeklyEarnin
 }
 
 export async function getMonthlyEarnings(months: number = 12): Promise<MonthlyEarning[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
@@ -1456,28 +1466,28 @@ export async function getMonthlyEarnings(months: number = 12): Promise<MonthlyEa
     const monthStartISO = new Date(`${monthStart}T00:00:00`).toISOString();
 
     // Get payments for this month
-    const { data: payments } = await supabase
+    const { data: payments } = await client
       .from('payments_non_phi')
       .select('amount, is_copay')
-      .eq('owner_user_id', user.id)
+      .eq('owner_user_id', userId)
       .gte('created_at', monthStartISO)
       .lt('created_at', nextMonth.toISOString());
 
     // Get insurance payments (paid claims) for this month
     // Use paid_amount if available, otherwise fall back to billed_amount
-    const { data: paidClaims } = await supabase
+    const { data: paidClaims } = await client
       .from('claims_non_phi')
       .select('paid_amount, billed_amount')
-      .eq('owner_user_id', user.id)
+      .eq('owner_user_id', userId)
       .eq('status', 'PAID')
       .gte('date_paid', monthStart)
       .lte('date_paid', monthEndDate);
 
     // Get visits for this month
-    const { count: visitCount } = await supabase
+    const { count: visitCount } = await client
       .from('visits_non_phi')
       .select('*', { count: 'exact', head: true })
-      .eq('owner_user_id', user.id)
+      .eq('owner_user_id', userId)
       .gte('visit_date', monthStart)
       .lte('visit_date', monthEndDate);
 
@@ -1503,15 +1513,14 @@ export async function getMonthlyEarnings(months: number = 12): Promise<MonthlyEa
 }
 
 export async function getYearlyEarnings(): Promise<YearlyEarning[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
@@ -1529,28 +1538,28 @@ export async function getYearlyEarnings(): Promise<YearlyEarning[]> {
     const yearEndISO = new Date(`${yearEnd}T23:59:59`).toISOString();
 
     // Get payments for this year
-    const { data: payments } = await supabase
+    const { data: payments } = await client
       .from('payments_non_phi')
       .select('amount, is_copay')
-      .eq('owner_user_id', user.id)
+      .eq('owner_user_id', userId)
       .gte('created_at', yearStartISO)
       .lte('created_at', yearEndISO);
 
     // Get insurance payments (paid claims) for this year
     // Use paid_amount if available, otherwise fall back to billed_amount
-    const { data: paidClaims } = await supabase
+    const { data: paidClaims } = await client
       .from('claims_non_phi')
       .select('paid_amount, billed_amount')
-      .eq('owner_user_id', user.id)
+      .eq('owner_user_id', userId)
       .eq('status', 'PAID')
       .gte('date_paid', yearStart)
       .lte('date_paid', yearEnd);
 
     // Get visits for this year
-    const { count: visitCount } = await supabase
+    const { count: visitCount } = await client
       .from('visits_non_phi')
       .select('*', { count: 'exact', head: true })
-      .eq('owner_user_id', user.id)
+      .eq('owner_user_id', userId)
       .gte('visit_date', yearStart)
       .lte('visit_date', yearEnd);
 
@@ -1576,15 +1585,14 @@ export async function getYearlyEarnings(): Promise<YearlyEarning[]> {
 }
 
 export async function getPaymentMethodBreakdown(period: 'week' | 'month' | 'year' = 'month'): Promise<PaymentMethodBreakdown[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   // Get user's timezone from profile
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('timezone')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   const timezone = profile?.timezone || 'America/Los_Angeles';
@@ -1601,10 +1609,10 @@ export async function getPaymentMethodBreakdown(period: 'week' | 'month' | 'year
     startDate = new Date(`${todayStr.substring(0, 4)}-01-01T00:00:00`).toISOString();
   }
 
-  const { data: payments } = await supabase
+  const { data: payments } = await client
     .from('payments_non_phi')
     .select('amount, method')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .gte('created_at', startDate);
 
   if (!payments || payments.length === 0) return [];
@@ -1628,14 +1636,13 @@ export async function getPaymentMethodBreakdown(period: 'week' | 'month' | 'year
 }
 
 export async function getPaymentsForExport(options?: { startDate?: string; endDate?: string }): Promise<PaymentExport[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
-  let query = supabase
+  let query = client
     .from('payments_non_phi')
     .select('created_at, amount, method, is_copay, patient:patients_non_phi(display_name)')
-    .eq('owner_user_id', user.id)
+    .eq('owner_user_id', userId)
     .order('created_at', { ascending: false });
 
   if (options?.startDate) {
@@ -1662,20 +1669,19 @@ export async function getPaymentsForExport(options?: { startDate?: string; endDa
 // =============================================
 
 export async function getPortals(activeOnly = true): Promise<Portal[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   // Get user's practice_id
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('practice_id')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   if (!profile?.practice_id) return [];
 
-  let query = supabase
+  let query = client
     .from('portals')
     .select('*')
     .eq('practice_id', profile.practice_id)
@@ -1690,21 +1696,20 @@ export async function getPortals(activeOnly = true): Promise<Portal[]> {
 }
 
 export async function getPortalsWithClaimCount(): Promise<PortalWithClaimCount[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return [];
 
   // Get user's practice_id
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('practice_id')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   if (!profile?.practice_id) return [];
 
   // Get all portals
-  const { data: portals } = await supabase
+  const { data: portals } = await client
     .from('portals')
     .select('*')
     .eq('practice_id', profile.practice_id)
@@ -1715,10 +1720,10 @@ export async function getPortalsWithClaimCount(): Promise<PortalWithClaimCount[]
   // Get claim counts for each portal
   const portalsWithCounts: PortalWithClaimCount[] = await Promise.all(
     portals.map(async (portal) => {
-      const { count } = await supabase
+      const { count } = await client
         .from('claims_non_phi')
         .select('*', { count: 'exact', head: true })
-        .eq('owner_user_id', user.id)
+        .eq('owner_user_id', userId)
         .eq('portal_name', portal.name);
 
       return {
@@ -1732,20 +1737,19 @@ export async function getPortalsWithClaimCount(): Promise<PortalWithClaimCount[]
 }
 
 export async function getPortal(id: string): Promise<Portal | null> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return null;
 
   // Get user's practice_id
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('practice_id')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   if (!profile?.practice_id) return null;
 
-  const { data } = await supabase
+  const { data } = await client
     .from('portals')
     .select('*')
     .eq('id', id)
@@ -1756,20 +1760,19 @@ export async function getPortal(id: string): Promise<Portal | null> {
 }
 
 export async function createPortal(portal: Omit<Portal, 'id' | 'practice_id' | 'created_at' | 'updated_at'>): Promise<Portal | null> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return null;
 
   // Get user's practice_id
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('practice_id')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   if (!profile?.practice_id) return null;
 
-  const { data } = await supabase
+  const { data } = await client
     .from('portals')
     .insert({ ...portal, practice_id: profile.practice_id })
     .select()
@@ -1779,20 +1782,19 @@ export async function createPortal(portal: Omit<Portal, 'id' | 'practice_id' | '
 }
 
 export async function updatePortal(id: string, updates: Partial<Omit<Portal, 'id' | 'practice_id' | 'created_at' | 'updated_at'>>): Promise<Portal | null> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return null;
 
   // Get user's practice_id
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('practice_id')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   if (!profile?.practice_id) return null;
 
-  const { data } = await supabase
+  const { data } = await client
     .from('portals')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', id)
@@ -1804,20 +1806,19 @@ export async function updatePortal(id: string, updates: Partial<Omit<Portal, 'id
 }
 
 export async function deletePortal(id: string): Promise<boolean> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return false;
 
   // Get user's practice_id
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('practice_id')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   if (!profile?.practice_id) return false;
 
-  const { error } = await supabase
+  const { error } = await client
     .from('portals')
     .delete()
     .eq('id', id)
@@ -1827,22 +1828,21 @@ export async function deletePortal(id: string): Promise<boolean> {
 }
 
 export async function updatePortalSortOrder(portals: { id: string; sort_order: number }[]): Promise<boolean> {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
+  const { userId, client } = await getEffectiveUserAndClient();
+  if (!userId) return false;
 
   // Get user's practice_id
-  const { data: profile } = await supabase
+  const { data: profile } = await client
     .from('profiles')
     .select('practice_id')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   if (!profile?.practice_id) return false;
 
   // Update each portal's sort order
   const updates = portals.map(({ id, sort_order }) =>
-    supabase
+    client
       .from('portals')
       .update({ sort_order, updated_at: new Date().toISOString() })
       .eq('id', id)

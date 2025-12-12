@@ -76,36 +76,23 @@ function PatientsContent() {
   }, []);
 
   const loadPatients = async () => {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      // Use the API endpoint which supports impersonation
+      const response = await fetch('/api/data/patients?archived=true');
+      const data = await response.json();
 
-    // Load active and archived patients in parallel
-    const [activeResult, archivedResult] = await Promise.all([
-      supabase
-        .from('patients_non_phi')
-        .select('*')
-        .eq('owner_user_id', user.id)
-        .eq('is_active', true)
-        .order('display_name'),
-      supabase
-        .from('patients_non_phi')
-        .select('*')
-        .eq('owner_user_id', user.id)
-        .eq('is_active', false)
-        .order('display_name'),
-    ]);
-
-    if (activeResult.data) {
-      setPatients(activeResult.data);
-      // Count demo patients (those with "(Demo)" in name)
-      const demoCount = activeResult.data.filter(p => p.display_name.includes('(Demo)')).length;
-      setDemoPatientCount(demoCount);
+      if (response.ok) {
+        setPatients(data.patients || []);
+        setArchivedPatients(data.archivedPatients || []);
+        // Count demo patients (those with "(Demo)" in name)
+        const demoCount = (data.patients || []).filter((p: PatientWithStats) => p.display_name.includes('(Demo)')).length;
+        setDemoPatientCount(demoCount);
+      }
+    } catch (error) {
+      console.error('Error loading patients:', error);
+    } finally {
+      setLoading(false);
     }
-    if (archivedResult.data) {
-      setArchivedPatients(archivedResult.data);
-    }
-    setLoading(false);
   };
 
   const handleRestorePatient = async (patientId: string) => {

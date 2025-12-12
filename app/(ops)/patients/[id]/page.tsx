@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
-import { createClient } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -119,137 +118,70 @@ export default function PatientDetailPage() {
 
   const handleArchivePatient = async () => {
     setArchiving(true);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setArchiving(false);
-      return;
-    }
+    try {
+      const response = await fetch(`/api/data/patients/${id}/actions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'archive' }),
+      });
 
-    const { error } = await supabase
-      .from('patients_non_phi')
-      .update({ is_active: false })
-      .eq('id', id)
-      .eq('owner_user_id', user.id);
-
-    if (!error) {
-      router.push('/patients?archived=success');
-    } else {
+      if (response.ok) {
+        router.push('/patients?archived=success');
+      } else {
+        showToast('Failed to archive');
+        setArchiving(false);
+      }
+    } catch (error) {
+      console.error('Error archiving patient:', error);
       showToast('Failed to archive');
       setArchiving(false);
     }
   };
 
   const loadData = useCallback(async () => {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const response = await fetch(`/api/data/patients/${id}`);
+      const data = await response.json();
 
-    // Run all queries in parallel for faster loading
-    const [patientResult, visitsResult, claimsResult, referralsResult, paymentsResult, templatesResult, clientDocsResult, intakeFormsResult, intakeLinksResult, intakeResponsesResult, benefitsResult, consentLinksResult] = await Promise.all([
-      supabase
-        .from('patients_non_phi')
-        .select('*')
-        .eq('id', id)
-        .eq('owner_user_id', user.id)
-        .single(),
-      supabase
-        .from('visits_non_phi')
-        .select('*')
-        .eq('patient_id', id)
-        .order('visit_date', { ascending: false }),
-      supabase
-        .from('claims_non_phi')
-        .select('*')
-        .eq('patient_id', id)
-        .order('date_of_service', { ascending: false }),
-      supabase
-        .from('referrals_non_phi')
-        .select('*')
-        .eq('patient_id', id)
-        .order('referral_start_date', { ascending: false }),
-      supabase
-        .from('payments_non_phi')
-        .select('*')
-        .eq('patient_id', id)
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('document_templates')
-        .select('*')
-        .eq('owner_user_id', user.id)
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true }),
-      supabase
-        .from('client_documents')
-        .select('*')
-        .eq('patient_id', id)
-        .eq('owner_user_id', user.id),
-      // Intake forms
-      supabase
-        .from('intake_forms')
-        .select('*')
-        .eq('owner_user_id', user.id)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false }),
-      // Intake links for this patient
-      supabase
-        .from('intake_links')
-        .select('*, intake_forms (*)')
-        .eq('patient_id', id)
-        .eq('owner_user_id', user.id)
-        .order('created_at', { ascending: false }),
-      // Intake responses for this patient
-      supabase
-        .from('intake_responses')
-        .select('*, intake_forms (*)')
-        .eq('patient_id', id)
-        .eq('owner_user_id', user.id)
-        .order('submitted_at', { ascending: false }),
-      // Patient benefits
-      supabase
-        .from('patient_benefits')
-        .select('*')
-        .eq('patient_id', id)
-        .eq('owner_user_id', user.id)
-        .single(),
-      // Consent links for this patient
-      supabase
-        .from('consent_links')
-        .select('*')
-        .eq('patient_id', id)
-        .eq('owner_user_id', user.id)
-        .order('created_at', { ascending: false }),
-    ]);
+      if (!response.ok) {
+        console.error('[PatientDetail] Error loading data:', data.error);
+        setLoading(false);
+        return;
+      }
 
-    if (patientResult.data) {
-      setPatient(patientResult.data);
+      if (data.patient) {
+        setPatient(data.patient);
+      }
+      setVisits(data.visits || []);
+      setClaims(data.claims || []);
+      setReferrals(data.referrals || []);
+      setPayments(data.payments || []);
+
+      // Merge templates with client documents
+      const templates = data.templates || [];
+      const clientDocs = data.clientDocs || [];
+      const docsWithStatus: DocumentWithStatus[] = templates.map((template: DocumentTemplate) => ({
+        ...template,
+        clientDoc: clientDocs.find((cd: ClientDocument) => cd.template_id === template.id) || null,
+      }));
+      setDocuments(docsWithStatus);
+
+      // Set intake data
+      setIntakeForms(data.intakeForms || []);
+      setIntakeLinks(data.intakeLinks || []);
+      setIntakeResponses(data.intakeResponses || []);
+
+      // Set benefits (may be null if not configured)
+      setBenefits(data.benefits || null);
+
+      // Set consent links
+      setConsentLinks(data.consentLinks || []);
+
+      setLoading(false);
+    } catch (error) {
+      console.error('[PatientDetail] Error loading data:', error);
+      setLoading(false);
     }
-    setVisits(visitsResult.data || []);
-    setClaims(claimsResult.data || []);
-    setReferrals(referralsResult.data || []);
-    setPayments(paymentsResult.data || []);
-
-    // Merge templates with client documents
-    const templates = templatesResult.data || [];
-    const clientDocs = clientDocsResult.data || [];
-    const docsWithStatus: DocumentWithStatus[] = templates.map(template => ({
-      ...template,
-      clientDoc: clientDocs.find(cd => cd.template_id === template.id) || null,
-    }));
-    setDocuments(docsWithStatus);
-
-    // Set intake data
-    setIntakeForms(intakeFormsResult.data || []);
-    setIntakeLinks(intakeLinksResult.data || []);
-    setIntakeResponses(intakeResponsesResult.data || []);
-
-    // Set benefits (may be null if not configured)
-    setBenefits(benefitsResult.data || null);
-
-    // Set consent links
-    setConsentLinks(consentLinksResult.data || []);
-
-    setLoading(false);
   }, [id]);
 
   useEffect(() => {
@@ -266,27 +198,29 @@ export default function PatientDetailPage() {
     if (!paymentAmount) return;
 
     setSavingPayment(true);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setSavingPayment(false);
-      return;
-    }
+    try {
+      const response = await fetch(`/api/data/patients/${id}/actions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'logPayment',
+          data: {
+            amount: paymentAmount,
+            method: paymentMethod,
+            // For cash-only practices, payments are never copays
+            is_copay: !isCashOnly && paymentIsCopay,
+          },
+        }),
+      });
 
-    const { error } = await supabase.from('payments_non_phi').insert({
-      owner_user_id: user.id,
-      patient_id: id,
-      amount: parseFloat(paymentAmount),
-      method: paymentMethod,
-      // For cash-only practices, payments are never copays
-      is_copay: !isCashOnly && paymentIsCopay,
-    });
-
-    if (!error) {
-      setShowPaymentDialog(false);
-      resetPaymentForm();
-      loadData();
-      router.refresh();
+      if (response.ok) {
+        setShowPaymentDialog(false);
+        resetPaymentForm();
+        loadData();
+        router.refresh();
+      }
+    } catch (error) {
+      console.error('Error saving payment:', error);
     }
     setSavingPayment(false);
   };
@@ -297,37 +231,24 @@ export default function PatientDetailPage() {
 
   const handleSignDocument = async (doc: DocumentWithStatus) => {
     setSavingSignature(true);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setSavingSignature(false);
-      return;
-    }
-
-    if (doc.clientDoc) {
-      // Update existing
-      const { error } = await supabase
-        .from('client_documents')
-        .update({
-          status: 'SIGNED',
-          signed_at: new Date().toISOString(),
-          signature_data: 'Acknowledged',
-        })
-        .eq('id', doc.clientDoc.id);
-
-      if (error) console.error('Error updating document:', error);
-    } else {
-      // Create new
-      const { error } = await supabase.from('client_documents').insert({
-        owner_user_id: user.id,
-        patient_id: id,
-        template_id: doc.id,
-        status: 'SIGNED',
-        signed_at: new Date().toISOString(),
-        signature_data: 'Acknowledged',
+    try {
+      const response = await fetch(`/api/data/patients/${id}/actions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'signDocument',
+          data: {
+            templateId: doc.id,
+            clientDocId: doc.clientDoc?.id || null,
+          },
+        }),
       });
 
-      if (error) console.error('Error signing document:', error);
+      if (!response.ok) {
+        console.error('Error signing document');
+      }
+    } catch (error) {
+      console.error('Error signing document:', error);
     }
 
     setSigningDoc(null);
@@ -348,36 +269,39 @@ export default function PatientDetailPage() {
     if (!selectedIntakeFormId) return;
 
     setSendingIntake(true);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setSendingIntake(false);
-      return;
-    }
+    try {
+      // Generate a random token
+      const token = crypto.randomUUID().replace(/-/g, '');
 
-    // Generate a random token
-    const token = crypto.randomUUID().replace(/-/g, '');
+      // Create expiration date (7 days from now)
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7);
 
-    // Create expiration date (7 days from now)
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
+      const response = await fetch(`/api/data/patients/${id}/actions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'createIntakeLink',
+          data: {
+            formId: selectedIntakeFormId,
+            token,
+            expiresAt: expiresAt.toISOString(),
+          },
+        }),
+      });
 
-    const { error } = await supabase.from('intake_links').insert({
-      token,
-      form_id: selectedIntakeFormId,
-      patient_id: id,
-      owner_user_id: user.id,
-      expires_at: expiresAt.toISOString(),
-    });
-
-    if (error) {
+      if (!response.ok) {
+        console.error('Error creating intake link');
+        alert('Failed to create intake link');
+      } else {
+        setShowSendIntakeDialog(false);
+        setSelectedIntakeFormId('');
+        loadData();
+        router.refresh();
+      }
+    } catch (error) {
       console.error('Error creating intake link:', error);
       alert('Failed to create intake link');
-    } else {
-      setShowSendIntakeDialog(false);
-      setSelectedIntakeFormId('');
-      loadData();
-      router.refresh();
     }
     setSendingIntake(false);
   };
@@ -390,44 +314,49 @@ export default function PatientDetailPage() {
 
   const handleSendConsentForm = async (doc: DocumentWithStatus) => {
     setSendingConsentLink(true);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setSendingConsentLink(false);
-      return;
-    }
+    try {
+      // Generate a short random token (8 chars)
+      const chars = 'abcdefghijkmnopqrstuvwxyz23456789';
+      let token = '';
+      for (let i = 0; i < 8; i++) {
+        token += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
 
-    // Generate a short random token (8 chars)
-    const chars = 'abcdefghijkmnopqrstuvwxyz23456789';
-    let token = '';
-    for (let i = 0; i < 8; i++) {
-      token += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
+      // Create expiration date (7 days from now)
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7);
 
-    // Create expiration date (7 days from now)
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
+      const response = await fetch(`/api/data/patients/${id}/actions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'createConsentLink',
+          data: {
+            templateId: doc.id,
+            token,
+            expiresAt: expiresAt.toISOString(),
+          },
+        }),
+      });
 
-    const { data: newLink, error } = await supabase.from('consent_links').insert({
-      token,
-      template_id: doc.id,
-      patient_id: id,
-      owner_user_id: user.id,
-      expires_at: expiresAt.toISOString(),
-    }).select().single();
+      const result = await response.json();
 
-    if (error) {
+      if (!response.ok) {
+        console.error('Error creating consent link:', result.error);
+        alert('Failed to create consent link');
+      } else if (result.link) {
+        // Immediately add the new link to state to prevent race conditions
+        setConsentLinks(prev => [result.link, ...prev]);
+        setSendingConsentDoc(null);
+        // Also copy the link immediately so user can share it
+        const url = `${window.location.origin}/consent/${token}`;
+        navigator.clipboard.writeText(url);
+        showToast('Link created and copied to clipboard');
+        router.refresh();
+      }
+    } catch (error) {
       console.error('Error creating consent link:', error);
       alert('Failed to create consent link');
-    } else if (newLink) {
-      // Immediately add the new link to state to prevent race conditions
-      setConsentLinks(prev => [newLink, ...prev]);
-      setSendingConsentDoc(null);
-      // Also copy the link immediately so user can share it
-      const url = `${window.location.origin}/consent/${token}`;
-      navigator.clipboard.writeText(url);
-      showToast('Link created and copied to clipboard');
-      router.refresh();
     }
     setSendingConsentLink(false);
   };

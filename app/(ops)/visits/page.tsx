@@ -2,7 +2,6 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { createClient } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -118,107 +117,91 @@ function VisitsContent() {
   }, [searchParams, allReferrals]);
 
   const loadData = async () => {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const response = await fetch('/api/data/visits');
+      const data = await response.json();
 
-    const today = getLocalDateString();
-
-    // Run all queries in parallel for faster loading
-    const [visitsResult, patientsResult, referralsResult, benefitsResult] = await Promise.all([
-      supabase
-        .from('visits_non_phi')
-        .select('*, patient:patients_non_phi(id, display_name)')
-        .eq('owner_user_id', user.id)
-        .order('visit_date', { ascending: false })
-        .limit(50),
-      supabase
-        .from('patients_non_phi')
-        .select('*')
-        .eq('owner_user_id', user.id)
-        .eq('is_active', true)
-        .order('display_name'),
-      supabase
-        .from('referrals_non_phi')
-        .select('*')
-        .eq('owner_user_id', user.id)
-        .or(`referral_expiration_date.is.null,referral_expiration_date.gte.${today}`)
-        .order('referral_start_date', { ascending: false }),
-      supabase
-        .from('patient_benefits')
-        .select('*')
-        .eq('owner_user_id', user.id),
-    ]);
-
-    const allVisits = visitsResult.data || [];
-    setVisits(allVisits);
-
-    // Compute visit counts per referral
-    const visitCountByReferral: Record<string, number> = {};
-    allVisits.forEach(v => {
-      if (v.referral_id) {
-        visitCountByReferral[v.referral_id] = (visitCountByReferral[v.referral_id] || 0) + 1;
+      if (!response.ok) {
+        console.error('[Visits] Error loading data:', data.error);
+        setLoading(false);
+        return;
       }
-    });
 
-    // Process referrals with usage info
-    const referralsWithUsage: ReferralWithUsage[] = (referralsResult.data || []).map(ref => {
-      const visitsUsed = visitCountByReferral[ref.id] || 0;
-      const isUnlimited = ref.visit_limit_type === 'UNLIMITED';
-      const visitsRemaining = isUnlimited ? null : (ref.visit_limit_count || 0) - visitsUsed;
-      const isExpired = ref.referral_expiration_date
-        ? new Date(ref.referral_expiration_date) < new Date(today)
-        : false;
-      const isExhausted = !isUnlimited && visitsRemaining !== null && visitsRemaining <= 0;
+      const today = getLocalDateString();
 
-      return {
-        ...ref,
-        visitsUsed,
-        visitsRemaining,
-        isExpired,
-        isExhausted,
-      };
-    });
+      const allVisits = data.visits || [];
+      setVisits(allVisits);
 
-    setAllReferrals(referralsWithUsage);
+      // Compute visit counts per referral
+      const visitCountByReferral: Record<string, number> = {};
+      allVisits.forEach((v: VisitWithPatient) => {
+        if (v.referral_id) {
+          visitCountByReferral[v.referral_id] = (visitCountByReferral[v.referral_id] || 0) + 1;
+        }
+      });
 
-    // Associate each patient with their "best" active referral (oldest usable) and benefits
-    const patientsWithReferrals = (patientsResult.data || []).map(patient => {
-      // Find best referral: oldest non-expired, non-exhausted referral for this patient
-      const patientReferrals = referralsWithUsage
-        .filter(r => r.patient_id === patient.id && !r.isExpired && !r.isExhausted)
-        .sort((a, b) => {
-          // Sort by start date ascending (oldest first = FIFO)
-          const dateA = a.referral_start_date ? new Date(a.referral_start_date).getTime() : 0;
-          const dateB = b.referral_start_date ? new Date(b.referral_start_date).getTime() : 0;
-          return dateA - dateB;
-        });
+      // Process referrals with usage info
+      const referralsWithUsage: ReferralWithUsage[] = (data.referrals || []).map((ref: ReferralNonPhi) => {
+        const visitsUsed = visitCountByReferral[ref.id] || 0;
+        const isUnlimited = ref.visit_limit_type === 'UNLIMITED';
+        const visitsRemaining = isUnlimited ? null : (ref.visit_limit_count || 0) - visitsUsed;
+        const isExpired = ref.referral_expiration_date
+          ? new Date(ref.referral_expiration_date) < new Date(today)
+          : false;
+        const isExhausted = !isUnlimited && visitsRemaining !== null && visitsRemaining <= 0;
 
-      const bestReferral = patientReferrals[0] || null;
-      const patientBenefits = (benefitsResult.data || []).find(b => b.patient_id === patient.id);
+        return {
+          ...ref,
+          visitsUsed,
+          visitsRemaining,
+          isExpired,
+          isExhausted,
+        };
+      });
 
-      return {
-        ...patient,
-        activeReferralId: bestReferral?.id || null,
-        benefits: patientBenefits || null,
-      };
-    });
+      setAllReferrals(referralsWithUsage);
 
-    setPatients(patientsWithReferrals);
-    setLoading(false);
+      // Associate each patient with their "best" active referral (oldest usable) and benefits
+      const patientsWithReferrals = (data.patients || []).map((patient: PatientNonPhi) => {
+        // Find best referral: oldest non-expired, non-exhausted referral for this patient
+        const patientReferrals = referralsWithUsage
+          .filter(r => r.patient_id === patient.id && !r.isExpired && !r.isExhausted)
+          .sort((a, b) => {
+            // Sort by start date ascending (oldest first = FIFO)
+            const dateA = a.referral_start_date ? new Date(a.referral_start_date).getTime() : 0;
+            const dateB = b.referral_start_date ? new Date(b.referral_start_date).getTime() : 0;
+            return dateA - dateB;
+          });
 
-    // Auto-select best referral for preselected patient (from URL param)
-    if (preselectedPatientId && !selectedReferralId) {
-      const bestReferral = referralsWithUsage
-        .filter(r => r.patient_id === preselectedPatientId && !r.isExpired && !r.isExhausted)
-        .sort((a, b) => {
-          const dateA = a.referral_start_date ? new Date(a.referral_start_date).getTime() : 0;
-          const dateB = b.referral_start_date ? new Date(b.referral_start_date).getTime() : 0;
-          return dateA - dateB;
-        })[0];
-      if (bestReferral) {
-        setSelectedReferralId(bestReferral.id);
+        const bestReferral = patientReferrals[0] || null;
+        const patientBenefits = (data.benefits || []).find((b: { patient_id: string }) => b.patient_id === patient.id);
+
+        return {
+          ...patient,
+          activeReferralId: bestReferral?.id || null,
+          benefits: patientBenefits || null,
+        };
+      });
+
+      setPatients(patientsWithReferrals);
+      setLoading(false);
+
+      // Auto-select best referral for preselected patient (from URL param)
+      if (preselectedPatientId && !selectedReferralId) {
+        const bestReferral = referralsWithUsage
+          .filter(r => r.patient_id === preselectedPatientId && !r.isExpired && !r.isExhausted)
+          .sort((a, b) => {
+            const dateA = a.referral_start_date ? new Date(a.referral_start_date).getTime() : 0;
+            const dateB = b.referral_start_date ? new Date(b.referral_start_date).getTime() : 0;
+            return dateA - dateB;
+          })[0];
+        if (bestReferral) {
+          setSelectedReferralId(bestReferral.id);
+        }
       }
+    } catch (error) {
+      console.error('[Visits] Error loading data:', error);
+      setLoading(false);
     }
   };
 
@@ -269,67 +252,72 @@ function VisitsContent() {
     if (!selectedPatientId || !visitDate) return;
 
     setSaving(true);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      // Find the selected patient
+      const patient = patients.find(p => p.id === selectedPatientId);
 
-    // Find the selected patient
-    const patient = patients.find(p => p.id === selectedPatientId);
+      // Use the explicitly selected referral (or null if none/"no-referral" selected)
+      const referralIdToUse = selectedReferralId && selectedReferralId !== 'no-referral'
+        ? selectedReferralId
+        : null;
 
-    // Use the explicitly selected referral (or null if none/"no-referral" selected)
-    const referralIdToUse = selectedReferralId && selectedReferralId !== 'no-referral'
-      ? selectedReferralId
-      : null;
+      const response = await fetch('/api/data/visits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patient_id: selectedPatientId,
+          referral_id: referralIdToUse,
+          visit_date: visitDate,
+          is_billable_to_insurance: isBillable,
+        }),
+      });
 
-    const { data: visitData, error } = await supabase.from('visits_non_phi').insert({
-      owner_user_id: user.id,
-      patient_id: selectedPatientId,
-      referral_id: referralIdToUse,
-      visit_date: visitDate,
-      is_billable_to_insurance: isBillable,
-    }).select().single();
+      const result = await response.json();
 
-    if (!error && visitData) {
-      // Close visit dialog
-      setShowDialog(false);
+      if (response.ok && result.visit) {
+        // Close visit dialog
+        setShowDialog(false);
 
-      // Set up payment prompt
-      setNewVisitId(visitData.id);
-      setPaymentPatient(patient || null);
+        // Set up payment prompt
+        setNewVisitId(result.visit.id);
+        setPaymentPatient(patient || null);
 
-      // Calculate collection amount using benefits calculator (for insurance practices)
-      // For cash-only or patients without benefits, fall back to default amount
-      if (!isCashOnly && patient?.benefits) {
-        const collection = getCollectAmount(patient, patient.benefits);
-        setCollectionResult(collection);
-        setPaymentAmount(collection.collect_amount.toFixed(2));
-      } else {
-        setCollectionResult(null);
-        // Use default copay amount if available (can be repurposed as session rate for cash-only)
-        setPaymentAmount(patient?.default_copay_amount?.toString() || '');
+        // Calculate collection amount using benefits calculator (for insurance practices)
+        // For cash-only or patients without benefits, fall back to default amount
+        if (!isCashOnly && patient?.benefits) {
+          const collection = getCollectAmount(patient, patient.benefits);
+          setCollectionResult(collection);
+          setPaymentAmount(collection.collect_amount.toFixed(2));
+        } else {
+          setCollectionResult(null);
+          // Use default copay amount if available (can be repurposed as session rate for cash-only)
+          setPaymentAmount(patient?.default_copay_amount?.toString() || '');
+        }
+        setPaymentMethod('CASH');
+
+        // Check if the visit was added for today
+        const today = getLocalDateString();
+        const wasAddedForToday = visitDate === today;
+
+        // Reset visit form
+        setSelectedPatientId('');
+        setSelectedReferralId('');
+        setVisitDate(getLocalDateString());
+        setIsBillable(true);
+
+        // If added for today, switch to "Today" filter so user sees it immediately
+        if (wasAddedForToday) {
+          setDateFilter('today');
+        }
+
+        // Reload data and show payment prompt
+        await loadData();
+        router.refresh();
+        router.replace('/visits');
+        setShowPaymentDialog(true);
       }
-      setPaymentMethod('CASH');
-
-      // Check if the visit was added for today
-      const today = getLocalDateString();
-      const wasAddedForToday = visitDate === today;
-
-      // Reset visit form
-      setSelectedPatientId('');
-      setSelectedReferralId('');
-      setVisitDate(getLocalDateString());
-      setIsBillable(true);
-
-      // If added for today, switch to "Today" filter so user sees it immediately
-      if (wasAddedForToday) {
-        setDateFilter('today');
-      }
-
-      // Reload data and show payment prompt
-      await loadData();
-      router.refresh();
-      router.replace('/visits');
-      setShowPaymentDialog(true);
+    } catch (error) {
+      console.error('Error adding visit:', error);
     }
     setSaving(false);
   };
@@ -338,31 +326,35 @@ function VisitsContent() {
     if (!paymentAmount || !newVisitId || !paymentPatient) return;
 
     setSavingPayment(true);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const response = await fetch('/api/data/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patient_id: paymentPatient.id,
+          visit_id: newVisitId,
+          amount: paymentAmount,
+          method: paymentMethod,
+          // Only mark as copay for insurance practices
+          is_copay: !isCashOnly,
+        }),
+      });
 
-    const { error } = await supabase.from('payments_non_phi').insert({
-      owner_user_id: user.id,
-      patient_id: paymentPatient.id,
-      visit_id: newVisitId,
-      amount: parseFloat(paymentAmount),
-      method: paymentMethod,
-      // Only mark as copay for insurance practices
-      is_copay: !isCashOnly,
-    });
-
-    if (!error) {
-      setShowPaymentDialog(false);
-      setNewVisitId(null);
-      setPaymentPatient(null);
-      setPaymentAmount('');
-      setPaymentMethod('CASH');
-      setCollectionResult(null);
-      showToast(`$${parseFloat(paymentAmount).toFixed(2)} payment collected`);
-      loadData();
-      router.refresh();
-    } else {
+      if (response.ok) {
+        setShowPaymentDialog(false);
+        setNewVisitId(null);
+        setPaymentPatient(null);
+        setPaymentAmount('');
+        setPaymentMethod('CASH');
+        setCollectionResult(null);
+        showToast(`$${parseFloat(paymentAmount).toFixed(2)} payment collected`);
+        loadData();
+        router.refresh();
+      } else {
+        showToast('Failed to log payment', 'error');
+      }
+    } catch (error) {
+      console.error('Error logging payment:', error);
       showToast('Failed to log payment', 'error');
     }
     setSavingPayment(false);

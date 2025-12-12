@@ -104,89 +104,91 @@ export default function SettingsPage() {
   }, []);
 
   const loadProfile = async () => {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    console.log('[Settings] User:', user?.id, user?.email);
-    if (!user) return;
+    try {
+      // Use the API endpoint which supports impersonation
+      const response = await fetch('/api/data/settings');
+      const data = await response.json();
 
-    const { data, error: profileError } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
+      console.log('[Settings] API response:', data);
 
-    console.log('[Settings] Profile:', { data, error: profileError?.message });
+      if (!response.ok) {
+        console.error('[Settings] API error:', data.error);
+        setLoading(false);
+        return;
+      }
 
-    if (data) {
-      setFullName(data.full_name || '');
-      setTimezone(data.timezone || 'America/Los_Angeles');
-      setClaimThreshold(String(data.claim_pending_threshold_days || 21));
-      setReferralWarning(String(data.referral_warning_days || 30));
+      const { profile, practice } = data;
 
-      // Load practice settings if user has a practice
-      console.log('[Settings] Practice ID from profile:', data.practice_id);
-      if (data.practice_id) {
-        setPracticeId(data.practice_id);
-        const { data: practiceData, error: practiceError } = await supabase
-          .from('practices')
-          .select('settings')
-          .eq('id', data.practice_id)
-          .single();
+      if (profile) {
+        setFullName(profile.full_name || '');
+        setTimezone(profile.timezone || 'America/Los_Angeles');
+        setClaimThreshold(String(profile.claim_pending_threshold_days || 21));
+        setReferralWarning(String(profile.referral_warning_days || 30));
 
-        console.log('[Settings] Practice data:', { practiceData, error: practiceError?.message });
+        // Load practice settings if user has a practice
+        if (profile.practice_id) {
+          setPracticeId(profile.practice_id);
 
-        if (practiceData?.settings) {
-          const settings = practiceData.settings as PracticeSettings;
-          console.log('[Settings] Settings object:', settings);
-          setPracticeInfo({
-            business_name: settings.business_name || '',
-            logo_url: settings.logo_url || '',
-            address_line1: settings.address_line1 || '',
-            address_line2: settings.address_line2 || '',
-            city: settings.city || '',
-            state: settings.state || '',
-            zip: settings.zip || '',
-            phone: settings.phone || '',
-          });
+          if (practice?.settings) {
+            const settings = practice.settings as PracticeSettings;
+            console.log('[Settings] Settings object:', settings);
+            setPracticeInfo({
+              business_name: settings.business_name || '',
+              logo_url: settings.logo_url || '',
+              address_line1: settings.address_line1 || '',
+              address_line2: settings.address_line2 || '',
+              city: settings.city || '',
+              state: settings.state || '',
+              zip: settings.zip || '',
+              phone: settings.phone || '',
+            });
 
-          // Load onboarding questionnaire data
-          if (settings.services) {
-            console.log('[Settings] Services:', settings.services);
-            setServices(settings.services);
-          }
-          if (settings.specialties) {
-            console.log('[Settings] Specialties:', settings.specialties);
-            setSpecialties(settings.specialties);
+            // Load onboarding questionnaire data
+            if (settings.services) {
+              console.log('[Settings] Services:', settings.services);
+              setServices(settings.services);
+            }
+            if (settings.specialties) {
+              console.log('[Settings] Specialties:', settings.specialties);
+              setSpecialties(settings.specialties);
+            }
           }
         }
       }
+    } catch (error) {
+      console.error('[Settings] Error loading profile:', error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleSave = async () => {
     setSaving(true);
     setMessage(null);
 
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const response = await fetch('/api/data/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profile: {
+            full_name: fullName.trim() || null,
+            timezone,
+            claim_pending_threshold_days: parseInt(claimThreshold) || 21,
+            referral_warning_days: parseInt(referralWarning) || 30,
+            updated_at: new Date().toISOString(),
+          },
+        }),
+      });
 
-    const { error } = await supabase
-      .from('profiles')
-      .upsert({
-        id: user.id,
-        full_name: fullName.trim() || null,
-        timezone,
-        claim_pending_threshold_days: parseInt(claimThreshold) || 21,
-        referral_warning_days: parseInt(referralWarning) || 30,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'id' });
-
-    if (error) {
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'Settings saved successfully' });
+      } else {
+        setMessage({ type: 'error', text: 'Failed to save settings' });
+      }
+    } catch (error) {
+      console.error('Error saving settings:', error);
       setMessage({ type: 'error', text: 'Failed to save settings' });
-    } else {
-      setMessage({ type: 'success', text: 'Settings saved successfully' });
     }
     setSaving(false);
   };

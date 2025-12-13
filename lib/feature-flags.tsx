@@ -12,6 +12,7 @@ export interface FeatureFlags {
   feature_bulk_operations: boolean;
   feature_intake_forms: boolean;
   feature_documents: boolean;
+  feature_referrals: boolean;
 }
 
 const DEFAULT_FLAGS: FeatureFlags = {
@@ -21,6 +22,7 @@ const DEFAULT_FLAGS: FeatureFlags = {
   feature_bulk_operations: false,
   feature_intake_forms: true,
   feature_documents: true,
+  feature_referrals: true,
 };
 
 // =============================================
@@ -139,4 +141,9 @@ export function useHasIntakeForms(): boolean {
 export function useHasDocuments(): boolean {
   const { flags } = useFeatureFlags();
   return flags.feature_documents;
+}
+
+export function useHasReferrals(): boolean {
+  const { flags } = useFeatureFlags();
+  return flags.feature_referrals;
 }

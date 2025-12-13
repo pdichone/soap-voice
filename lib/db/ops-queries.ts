@@ -242,11 +242,13 @@ export async function getPracticeConfig(): Promise<PracticeConfig> {
 export interface AdminFeatureFlags {
   feature_claims_tracking: boolean;
   feature_year_end_summary: boolean;
+  feature_referrals: boolean;
 }
 
 const DEFAULT_ADMIN_FLAGS: AdminFeatureFlags = {
   feature_claims_tracking: true,
   feature_year_end_summary: true,
+  feature_referrals: true,
 };
 
 /**
@@ -261,7 +263,7 @@ export async function getAdminFeatureFlags(): Promise<AdminFeatureFlags> {
   // Fetch from practitioners table where user_id matches
   const { data: practitioner, error } = await client
     .from('practitioners')
-    .select('feature_claims_tracking, feature_year_end_summary')
+    .select('feature_claims_tracking, feature_year_end_summary, feature_referrals')
     .eq('user_id', userId)
     .single();
 
@@ -273,6 +275,7 @@ export async function getAdminFeatureFlags(): Promise<AdminFeatureFlags> {
   return {
     feature_claims_tracking: practitioner.feature_claims_tracking ?? true,
     feature_year_end_summary: practitioner.feature_year_end_summary ?? true,
+    feature_referrals: practitioner.feature_referrals ?? true,
   };
 }
 

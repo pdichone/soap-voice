@@ -71,6 +71,7 @@ export default async function PractitionerDetailPage({ params }: Props) {
   // Only show feature flags that are actually implemented
   const featureFlags = [
     { key: 'feature_claims_tracking', label: 'Claims Tracking', enabled: practitioner.feature_claims_tracking },
+    { key: 'feature_referrals', label: 'Referral Management', enabled: practitioner.feature_referrals },
     { key: 'feature_year_end_summary', label: 'Bulk Year-End Statements', enabled: practitioner.feature_year_end_summary },
     { key: 'feature_intake_forms', label: 'Intake Forms', enabled: practitioner.feature_intake_forms },
     { key: 'feature_documents', label: 'Document Templates', enabled: practitioner.feature_documents },

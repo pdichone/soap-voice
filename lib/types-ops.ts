@@ -444,6 +444,7 @@ export interface Practitioner {
   feature_bulk_operations: boolean;
   feature_intake_forms: boolean;
   feature_documents: boolean;
+  feature_referrals: boolean;
   practice_type: PracticeType;
   last_login_at: string | null;
   last_activity_at: string | null;
@@ -538,6 +539,7 @@ export interface PractitionerCreateInput {
   feature_bulk_operations?: boolean;
   feature_intake_forms?: boolean;
   feature_documents?: boolean;
+  feature_referrals?: boolean;
 }
 
 export interface PractitionerUpdateInput {
@@ -557,4 +559,5 @@ export interface PractitionerUpdateInput {
   feature_bulk_operations?: boolean;
   feature_intake_forms?: boolean;
   feature_documents?: boolean;
+  feature_referrals?: boolean;
 }

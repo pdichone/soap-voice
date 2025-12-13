@@ -9,6 +9,7 @@ export interface FeatureFlags {
   feature_bulk_operations: boolean;
   feature_intake_forms: boolean;
   feature_documents: boolean;
+  feature_referrals: boolean;
 }
 
 const DEFAULT_FLAGS: FeatureFlags = {
@@ -18,6 +19,7 @@ const DEFAULT_FLAGS: FeatureFlags = {
   feature_bulk_operations: false,
   feature_intake_forms: true,
   feature_documents: true,
+  feature_referrals: true,
 };
 
 // GET /api/feature-flags
@@ -35,7 +37,7 @@ export async function GET() {
     const serviceClient = createServiceRoleClient();
     const { data: practitioner, error: practitionerError } = await serviceClient
       .from('practitioners')
-      .select('feature_claims_tracking, feature_year_end_summary, feature_insurance_calculator, feature_bulk_operations, feature_intake_forms, feature_documents')
+      .select('feature_claims_tracking, feature_year_end_summary, feature_insurance_calculator, feature_bulk_operations, feature_intake_forms, feature_documents, feature_referrals')
       .eq('user_id', user.id)
       .single();
 
@@ -52,6 +54,7 @@ export async function GET() {
       feature_bulk_operations: practitioner.feature_bulk_operations ?? false,
       feature_intake_forms: practitioner.feature_intake_forms ?? true,
       feature_documents: practitioner.feature_documents ?? true,
+      feature_referrals: practitioner.feature_referrals ?? true,
     };
 
     return NextResponse.json(flags);

@@ -70,7 +70,9 @@ export default async function DashboardPage() {
 
   // Claims are shown only if: practice type supports it AND admin has enabled the feature
   const showClaims = features.showClaims && adminFlags.feature_claims_tracking;
-  const totalReferralAlerts = features.showReferrals
+  // Referrals are shown only if: practice type supports it AND admin has enabled the feature
+  const showReferrals = features.showReferrals && adminFlags.feature_referrals;
+  const totalReferralAlerts = showReferrals
     ? referralAlerts.critical.length + referralAlerts.warning.length
     : 0;
 
@@ -155,7 +157,7 @@ export default async function DashboardPage() {
         )}
 
         {/* Referral Alerts - only show for insurance practice */}
-        {features.showReferrals && (
+        {showReferrals && (
           <Card className={totalReferralAlerts > 0 ? 'border-amber-200' : ''}>
             <CardHeader className="pb-2">
               <CardTitle className="text-xs font-medium text-gray-500 uppercase tracking-wide">
@@ -314,7 +316,7 @@ export default async function DashboardPage() {
         {/* Right Column */}
         <div className="space-y-6">
           {/* Referral Alerts - only for insurance practice */}
-          {features.showReferrals && (
+          {showReferrals && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base font-semibold">Referral Alerts</CardTitle>

@@ -13,6 +13,15 @@ export default async function ClientDetailPage({ params }: Props) {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
 
+  // Fetch profile to get timezone
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('timezone')
+    .eq('id', user?.id || '')
+    .single();
+
+  const timezone = profile?.timezone || 'America/Los_Angeles';
+
   const { data: client } = await supabase
     .from('clients')
     .select('*')
@@ -126,12 +135,14 @@ export default async function ClientDetailPage({ params }: Props) {
                         month: 'short',
                         day: 'numeric',
                         year: 'numeric',
+                        timeZone: timezone,
                       })}
                     </p>
                     <p className="text-sm text-gray-500">
                       {new Date(session.session_date).toLocaleTimeString('en-US', {
                         hour: 'numeric',
                         minute: '2-digit',
+                        timeZone: timezone,
                       })}
                     </p>
                   </div>

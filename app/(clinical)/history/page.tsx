@@ -6,6 +6,15 @@ export default async function HistoryPage() {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
 
+  // Fetch profile to get timezone
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('timezone')
+    .eq('id', user?.id || '')
+    .single();
+
+  const timezone = profile?.timezone || 'America/Los_Angeles';
+
   const { data: sessions } = await supabase
     .from('sessions')
     .select(`
@@ -23,6 +32,7 @@ export default async function HistoryPage() {
       month: 'long',
       day: 'numeric',
       year: 'numeric',
+      timeZone: timezone,
     });
     if (!groupedSessions[date]) {
       groupedSessions[date] = [];
@@ -58,6 +68,7 @@ export default async function HistoryPage() {
                           {new Date(session.session_date).toLocaleTimeString('en-US', {
                             hour: 'numeric',
                             minute: '2-digit',
+                            timeZone: timezone,
                           })}
                         </p>
                       </div>

@@ -6,6 +6,15 @@ export default async function HomePage() {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
 
+  // Fetch profile to get timezone
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('timezone')
+    .eq('id', user?.id || '')
+    .single();
+
+  const timezone = profile?.timezone || 'America/Los_Angeles';
+
   // Fetch recent sessions with client names
   const { data: sessions } = await supabase
     .from('sessions')
@@ -62,6 +71,7 @@ export default async function HomePage() {
                         year: 'numeric',
                         hour: 'numeric',
                         minute: '2-digit',
+                        timeZone: timezone,
                       })}
                     </p>
                   </div>

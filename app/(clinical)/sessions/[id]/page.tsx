@@ -14,6 +14,15 @@ export default async function SessionDetailPage({ params }: Props) {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
 
+  // Fetch profile to get timezone
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('timezone')
+    .eq('id', user?.id || '')
+    .single();
+
+  const timezone = profile?.timezone || 'America/Los_Angeles';
+
   const { data: session } = await supabase
     .from('sessions')
     .select(`
@@ -46,6 +55,7 @@ export default async function SessionDetailPage({ params }: Props) {
               year: 'numeric',
               hour: 'numeric',
               minute: '2-digit',
+              timeZone: timezone,
             })}
           </p>
         </div>

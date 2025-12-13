@@ -14,6 +14,46 @@ export function getLocalDateString(): string {
 }
 
 /**
+ * Get the current hour in a specific timezone (0-23)
+ */
+export function getCurrentHourInTimezone(timezone: string): number {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour: 'numeric',
+    hour12: false,
+  });
+  const hourStr = formatter.format(now);
+  return parseInt(hourStr, 10);
+}
+
+/**
+ * Get current date formatted for display in a specific timezone
+ */
+export function getFormattedDateInTimezone(
+  timezone: string,
+  options: Intl.DateTimeFormatOptions = {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }
+): string {
+  const now = new Date();
+  return now.toLocaleDateString('en-US', { ...options, timeZone: timezone });
+}
+
+/**
+ * Get greeting based on time of day in a specific timezone
+ */
+export function getGreetingForTimezone(timezone: string): string {
+  const hour = getCurrentHourInTimezone(timezone);
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+/**
  * Parse a YYYY-MM-DD date string without timezone shifting.
  * JavaScript's Date constructor interprets "YYYY-MM-DD" as UTC midnight,
  * which can cause the date to shift when displayed in local time.

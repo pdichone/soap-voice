@@ -17,17 +17,9 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { formatDate } from '@/lib/date-utils';
+import { formatDate, getGreetingForTimezone, getFormattedDateInTimezone } from '@/lib/date-utils';
 import { PaymentSuccessBanner } from '@/components/ops/PaymentSuccessBanner';
 import { Suspense } from 'react';
-
-// Helper to get greeting based on time of day
-function getGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 17) return 'Good afternoon';
-  return 'Good evening';
-}
 
 // Helper to calculate days since a date
 function daysSince(dateStr: string | null | undefined): number | null {
@@ -73,6 +65,7 @@ export default async function DashboardPage() {
   ]);
 
   const userName = profile?.full_name || 'there';
+  const timezone = profile?.timezone || 'America/Los_Angeles';
   const { features } = practiceConfig;
 
   // Claims are shown only if: practice type supports it AND admin has enabled the feature
@@ -92,15 +85,10 @@ export default async function DashboardPage() {
       <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold text-gray-900 break-words">
-            {getGreeting()}, {userName}
+            {getGreetingForTimezone(timezone)}, {userName}
           </h1>
           <p className="text-gray-500 text-sm">
-            {new Date().toLocaleDateString('en-US', {
-              weekday: 'long',
-              month: 'long',
-              day: 'numeric',
-              year: 'numeric',
-            })}
+            {getFormattedDateInTimezone(timezone)}
           </p>
         </div>
         <div className="flex gap-2">
@@ -431,7 +419,7 @@ export default async function DashboardPage() {
                 <div className="space-y-2">
                   {todaysPayments.slice(0, 4).map((payment) => {
                     const patient = payment.patient as { display_name?: string } | undefined;
-                    const time = new Date(payment.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                    const time = new Date(payment.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: timezone });
                     return (
                       <div key={payment.id} className="flex items-center justify-between py-2">
                         <div className="flex items-center gap-3">

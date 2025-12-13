@@ -8,7 +8,6 @@ import {
   getTodaysVisitsWithCollections,
   getTodaysPayments,
   getWeeklyPaymentsSummary,
-  getTodaysCopaysCollected,
   getReferralAlerts,
   getOverdueClaimsCount,
   getPracticeConfig,
@@ -56,7 +55,6 @@ export default async function DashboardPage() {
     todaysVisits,
     todaysPayments,
     weeklyPayments,
-    copaysCollected,
     referralAlerts,
     overdueClaimsCount,
     recentPatients,
@@ -69,7 +67,6 @@ export default async function DashboardPage() {
     getTodaysVisitsWithCollections(),
     getTodaysPayments(),
     getWeeklyPaymentsSummary(),
-    getTodaysCopaysCollected(),
     getReferralAlerts(),
     getOverdueClaimsCount(14), // 14 days threshold per reference
     getRecentPatients(5),
@@ -145,7 +142,7 @@ export default async function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">${copaysCollected.toFixed(2)}</div>
+            <div className="text-3xl font-bold">${todaysPayments.reduce((sum, p) => sum + (p.amount || 0), 0).toFixed(2)}</div>
             <p className="text-sm text-gray-500">
               {todaysVisits.length} {todaysVisits.length === 1 ? features.visitLabel.toLowerCase() : features.visitLabelPlural.toLowerCase()} today
             </p>
